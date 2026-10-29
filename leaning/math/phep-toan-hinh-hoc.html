@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Phép Toán Hình Học</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ============ THEME TOKENS ============ */
+:root{
+  --bg:#f3efe6; --panel:#fffdf8; --box:#f6f1e7; --ink:#1f2430; --muted:#6b7280; --line:#ddd5c6;
+  --accent:#4f6bed; --accent-soft:rgba(79,107,237,.12);
+  --c1:#3b82f6; --c2:#f97345; --c3:#16a36a; --c4:#e3a400; --c5:#9b5cf6; --red:#e5484d;
+  --shadow:0 12px 32px rgba(60,45,20,.12);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12141a; --panel:#1b1e27; --box:#232733; --ink:#eef0f5; --muted:#9aa3b2; --line:#343a48;
+    --accent:#7b93ff; --accent-soft:rgba(123,147,255,.16);
+    --c1:#5b9bff; --c2:#ff8a5f; --c3:#2fc285; --c4:#f5bd1f; --c5:#b085ff; --red:#ff6369;
+    --shadow:0 12px 32px rgba(0,0,0,.45);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12141a; --panel:#1b1e27; --box:#232733; --ink:#eef0f5; --muted:#9aa3b2; --line:#343a48;
+  --accent:#7b93ff; --accent-soft:rgba(123,147,255,.16);
+  --c1:#5b9bff; --c2:#ff8a5f; --c3:#2fc285; --c4:#f5bd1f; --c5:#b085ff; --red:#ff6369;
+  --shadow:0 12px 32px rgba(0,0,0,.45);
+  color-scheme:dark;
+}
+
+/* ============ LAYOUT ============ */
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  min-height:100vh; background:var(--bg); color:var(--ink);
+  font-family:'Nunito',system-ui,-apple-system,'Segoe UI',sans-serif;
+  display:flex; justify-content:center; align-items:center; padding:16px;
+}
+.deck{width:100%; max-width:1080px; display:flex; flex-direction:column; gap:12px}
+.deck:fullscreen{max-width:none; padding:24px; background:var(--bg); justify-content:center}
+header{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+.chip{
+  font-weight:800; font-size:13px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--accent); background:var(--accent-soft); padding:5px 10px; border-radius:999px; white-space:nowrap;
+}
+h1{margin:0; font-size:clamp(18px,2.6vw,26px); font-weight:900; line-height:1.2}
+.stage-wrap{
+  background:var(--panel); border:1px solid var(--line); border-radius:18px;
+  overflow:hidden; box-shadow:var(--shadow); position:relative;
+}
+.progress{height:5px; background:var(--line)}
+.progress > i{display:block; height:100%; width:0; background:var(--accent); transition:width .5s ease}
+svg#stage{display:block; width:100%; height:auto; aspect-ratio:16/9; user-select:none}
+.caption{
+  min-height:3.4em; padding:14px 18px; border-top:1px solid var(--line);
+  font-size:clamp(16px,2.1vw,21px); font-weight:700; line-height:1.45;
+  display:flex; align-items:center; gap:12px;
+}
+.caption .mic{flex:none; width:30px; height:30px; border-radius:50%; display:grid; place-items:center;
+  background:var(--accent-soft); color:var(--accent); font-size:15px}
+.caption span{transition:opacity .25s ease}
+.caption span.fade{opacity:0}
+.paused-badge{
+  position:absolute; top:12px; right:12px; font-weight:800; font-size:13px;
+  background:var(--ink); color:var(--panel); padding:4px 10px; border-radius:999px; display:none;
+}
+.paused .paused-badge{display:block}
+
+.controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+.controls .grow{flex:1}
+button, select{
+  font:inherit; font-weight:800; color:var(--ink); background:var(--panel);
+  border:1px solid var(--line); border-radius:10px; height:40px; min-width:40px; padding:0 12px; cursor:pointer;
+}
+button:hover, select:hover{border-color:var(--accent)}
+button.primary{background:var(--accent); color:#fff; border-color:var(--accent); min-width:56px}
+.dots{display:flex; gap:6px; flex-wrap:wrap}
+.dots button{width:14px; height:14px; min-width:0; padding:0; border-radius:50%; background:var(--line); border:none}
+.dots button.on{background:var(--accent); transform:scale(1.25)}
+.dots button.done{background:var(--muted)}
+label.tg{display:flex; align-items:center; gap:6px; font-weight:700; font-size:15px; cursor:pointer; white-space:nowrap}
+label.tg input{width:18px; height:18px; accent-color:var(--accent)}
+.hint{font-size:13px; color:var(--muted); text-align:center}
+
+/* ============ SVG STYLES ============ */
+#stage .t{fill:var(--ink); font-family:'Nunito',system-ui,sans-serif; font-weight:800}
+#stage .muted{fill:var(--muted); font-weight:700}
+#stage .eq{white-space:pre; font-weight:900}
+#stage .onfill{fill:#fff; font-weight:900}
+#stage .axis{stroke:var(--ink); stroke-width:3; stroke-linecap:round}
+#stage .frame{fill:none; stroke:var(--line); stroke-width:3}
+#stage .frame-cell{fill:none; stroke:var(--line); stroke-width:2}
+#stage .outline{fill:none; stroke:var(--accent); stroke-width:3; stroke-dasharray:8 6}
+#stage .outline-red{fill:none; stroke:var(--red); stroke-width:3; stroke-dasharray:8 6}
+#stage .box{fill:var(--box); stroke:var(--line); stroke-width:2}
+#stage .plate{fill:var(--box); stroke:var(--line); stroke-width:3}
+#stage .ghost{stroke:var(--muted); stroke-width:2; stroke-dasharray:5 4}
+#stage .eye{fill:#fff}
+#stage .pupil{fill:#1f2430}
+
+@media (max-width:640px){
+  body{padding:16px 16px 24px; align-items:flex-start}
+  .controls .grow{flex-basis:100%; order:10}
+  label.tg{font-size:14px}
+}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+  <header>
+    <span class="chip" id="chip">Bài 1/12</span>
+    <h1 id="title">Toán học bằng hình</h1>
+  </header>
+
+  <div class="stage-wrap" id="wrap">
+    <div class="progress"><i id="bar"></i></div>
+    <svg id="stage" viewBox="0 0 800 450" aria-label="Hình minh hoạ"></svg>
+    <div class="caption"><div class="mic">💬</div><span id="caption">…</span></div>
+    <div class="paused-badge">Tạm dừng</div>
+  </div>
+
+  <div class="controls">
+    <button id="prev" title="Slide trước (←)">◀</button>
+    <button id="play" class="primary" title="Tạm dừng / tiếp tục (Space)">❚❚</button>
+    <button id="next" title="Slide sau (→)">▶</button>
+    <button id="replay" title="Xem lại slide này (R)">↻</button>
+    <div class="grow"><div class="dots" id="dots"></div></div>
+    <label class="tg"><input type="checkbox" id="auto" checked> Tự chuyển</label>
+    <label class="tg"><input type="checkbox" id="voice"> Đọc to</label>
+    <select id="speed" title="Tốc độ">
+      <option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
+    <button id="fs" title="Toàn màn hình (F)">⛶</button>
+  </div>
+  <div class="hint">Phím tắt: ← → chuyển slide · Space tạm dừng · R xem lại · F toàn màn hình</div>
+</div>
+
+<script>
+/* ============ ENGINE ============ */
+const NS = 'http://www.w3.org/2000/svg';
+const stage = document.getElementById('stage');
+const $ = id => document.getElementById(id);
+const C = { blue:'var(--c1)', orange:'var(--c2)', green:'var(--c3)', yellow:'var(--c4)', purple:'var(--c5)', red:'var(--red)' };
+const PALETTE = [C.blue, C.orange, C.green, C.yellow, C.purple];
+const WORDS = ['một','hai','ba','bốn','năm','sáu','bảy','tám','chín','mười'];
+
+let SPEED = 1, token = 0, paused = false, idx = 0, finished = false;
+const active = new Set();
+class Cancel extends Error {}
+
+// Pausable, cancellable timer
+function wait(ms){
+  const t = token;
+  return new Promise((res, rej) => {
+    let left = ms / SPEED, last = performance.now();
+    (function tick(now){
+      if (t !== token) return rej(new Cancel());
+      if (now !== undefined){ if (!paused) left -= now - last; last = now; }
+      if (left <= 0) return res();
+      requestAnimationFrame(tick);
+    })();
+  });
+}
+
+// Web Animations wrapper: tracks animations so they can be paused/cancelled
+async function anim(node, frames, dur, opts = {}){
+  const t = token;
+  const a = node.animate(frames, {
+    duration: dur / SPEED, delay: (opts.delay || 0) / SPEED,
+    easing: opts.easing || 'cubic-bezier(.3,.7,.3,1)', fill: 'forwards'
+  });
+  active.add(a);
+  if (paused) a.pause();
+  try { await a.finished; } catch (e) { throw new Cancel(); } finally { active.delete(a); }
+  if (t !== token) throw new Cancel();
+  try { a.commitStyles(); } catch (e) {}
+  a.cancel();
+  return a;
+}
+
+// Narration: caption + optional Vietnamese speech
+function pickVoice(){
+  if (!('speechSynthesis' in window)) return null;
+  return speechSynthesis.getVoices().find(v => /^vi/i.test(v.lang)) || null;
+}
+function say(text, o = {}){
+  const t = token;
+  const cap = $('caption');
+  cap.classList.add('fade');
+  setTimeout(() => { if (t === token){ cap.textContent = text; cap.classList.remove('fade'); } }, 120);
+  let p;
+  if ($('voice').checked && 'speechSynthesis' in window){
+    const u = new SpeechSynthesisUtterance(o.speak || text);
+    u.lang = 'vi-VN'; u.rate = Math.min(1.6, 0.95 * SPEED);
+    const v = pickVoice(); if (v) u.voice = v;
+    const spoken = new Promise(r => { u.onend = r; u.onerror = r; });
+    speechSynthesis.speak(u);
+    p = Promise.race([spoken, wait(2500 + text.length * 110)]).then(() => {
+      if (t !== token) throw new Cancel();
+      return wait(o.dur !== undefined ? 150 : 350);
+    });
+  } else {
+    p = wait(o.dur !== undefined ? o.dur : 1100 + text.length * 48);
+  }
+  p.catch(() => {});
+  return p;
+}
+
+/* ============ SVG HELPERS ============ */
+function el(tag, attrs = {}, parent = stage){
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)){
+    if ((k === 'fill' || k === 'stroke') && String(v).includes('var(')) e.style.setProperty(k, v);
+    else e.setAttribute(k, v);
+  }
+  if (parent) parent.appendChild(e);
+  return e;
+}
+// node = outer <g> (position, via CSS translate) + inner <g> (scale / opacity / rotate)
+function node(x, y, parent = stage){
+  const g = el('g', {}, parent);
+  const inner = el('g', {}, g);
+  g.style.transform = `translate(${x}px,${y}px)`;
+  g.x = x; g.y = y; g.inner = inner;
+  inner.style.opacity = 0;
+  return g;
+}
+function shape(kind, color, s, p){
+  const r = 16 * s;
+  const ghost = color === 'none';
+  let e;
+  if (kind === 'circle') e = el('circle', { r, fill: color }, p);
+  else if (kind === 'square') e = el('rect', { x:-r, y:-r, width:2*r, height:2*r, rx:4*s, fill: color }, p);
+  else if (kind === 'tri') e = el('polygon', { points:`0,${-r*1.2} ${r*1.15},${r*.85} ${-r*1.15},${r*.85}`, fill: color, 'stroke-linejoin':'round' }, p);
+  else if (kind === 'star'){
+    const pts = [];
+    for (let i = 0; i < 10; i++){
+      const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .5 : r * 1.2;
+      pts.push(`${(Math.cos(a) * rr).toFixed(1)},${(Math.sin(a) * rr).toFixed(1)}`);
+    }
+    e = el('polygon', { points: pts.join(' '), fill: color, 'stroke-linejoin':'round' }, p);
+  }
+  else if (kind === 'ring') e = el('circle', { r, fill:'none', stroke: color, 'stroke-width': 4 }, p);
+  else if (kind === 'buddy'){
+    e = el('circle', { r, fill: color }, p);
+    for (const dx of [-r*.38, r*.38]){
+      el('circle', { cx:dx, cy:-r*.2, r:r*.28, class:'eye' }, p);
+      el('circle', { cx:dx + r*.06, cy:-r*.16, r:r*.13, class:'pupil' }, p);
+    }
+  }
+  if (ghost) e.setAttribute('class', 'ghost');
+  return e;
+}
+function item(x, y, kind, color, s = 1, parent = stage){
+  const g = node(x, y, parent); shape(kind, color, s, g.inner); return g;
+}
+function label(x, y, str, size = 28, cls = 't', parent = stage){
+  const g = node(x, y, parent);
+  const t = el('text', { 'font-size': size, 'text-anchor':'middle', 'dominant-baseline':'central', class: cls }, g.inner);
+  t.textContent = str; g.t = t;
+  return g;
+}
+// Equation made of coloured parts, revealed one by one
+function eqn(x, y, parts, size = 46){
+  const g = label(x, y, '', size, 't eq');
+  g.inner.style.opacity = 1;
+  g.parts = parts.map(([s, c]) => {
+    const ts = el('tspan', {}, g.t);
+    ts.textContent = s;
+    if (c) ts.style.fill = c;
+    ts.style.fillOpacity = 0;
+    return ts;
+  });
+  return g;
+}
+async function reveal(g, gap = 280){
+  for (const ts of g.parts){
+    await anim(ts, [{ fillOpacity: 0 }, { fillOpacity: 1 }], 260);
+    await wait(gap);
+  }
+}
+
+/* ============ MOTIONS ============ */
+const pop = (g, delay = 0, dur = 450) => anim(g.inner, [
+  { transform:'scale(0)', opacity:0 },
+  { transform:'scale(1.22)', opacity:1, offset:.65 },
+  { transform:'scale(1)', opacity:1 }
+], dur, { delay });
+const fadeIn = (g, dur = 500, delay = 0) => anim(g.inner, [{ opacity:0 }, { opacity:1 }], dur, { delay });
+const fadeOut = (g, dur = 450, dy = 0) => anim(g.inner, [
+  { opacity:1, transform:'translate(0px,0px) scale(1)' },
+  { opacity:0, transform:`translate(0px,${dy}px) scale(.5)` }
+], dur);
+const pulse = (g, dur = 380) => anim(g.inner, [
+  { transform:'scale(1)' }, { transform:'scale(1.18)' }, { transform:'scale(1)' }
+], dur);
+function moveTo(g, x, y, dur = 700, delay = 0){
+  const f = [{ transform:`translate(${g.x}px,${g.y}px)` }, { transform:`translate(${x}px,${y}px)` }];
+  g.x = x; g.y = y;
+  return anim(g, f, dur, { delay, easing:'cubic-bezier(.5,0,.3,1)' });
+}
+function hop(g, x, y, h = 60, dur = 700){
+  const x0 = g.x, y0 = g.y, f = [];
+  for (let i = 0; i <= 12; i++){
+    const t = i / 12;
+    f.push({ transform:`translate(${x0 + (x - x0) * t}px,${y0 + (y - y0) * t - 4 * h * t * (1 - t)}px)` });
+  }
+  g.x = x; g.y = y;
+  return anim(g, f, dur, { easing:'ease-in-out' });
+}
+const toBack = g => { stage.insertBefore(g, stage.firstChild); return g; };
+const all = (...ps) => Promise.all(ps.flat());
+
+/* ============ NUMBER LINE ============ */
+function numberLine(y, max = 10, x0 = 70, x1 = 730){
+  const step = (x1 - x0) / max;
+  const g = node(0, 0);
+  el('line', { x1:x0 - 25, y1:y, x2:x1 + 25, y2:y, class:'axis' }, g.inner);
+  el('polygon', { points:`${x1 + 34},${y} ${x1 + 22},${y - 7} ${x1 + 22},${y + 7}`, fill:'var(--ink)' }, g.inner);
+  for (let i = 0; i <= max; i++){
+    const x = x0 + i * step;
+    el('line', { x1:x, y1:y - 9, x2:x, y2:y + 9, class:'axis' }, g.inner);
+    const t = el('text', { x, y:y + 32, 'font-size':22, 'text-anchor':'middle', class:'t muted' }, g.inner);
+    t.textContent = i;
+  }
+  return { g, X: i => x0 + i * step, y, step };
+}
+async function arcStep(nl, a, b, color, mark){
+  const xa = nl.X(a), xb = nl.X(b), y = nl.y - 22, h = nl.step * 1.3;
+  const p = el('path', { d:`M${xa},${y} Q${(xa + xb) / 2},${y - h} ${xb},${y}`, fill:'none', stroke: color,
+    'stroke-width':4, 'stroke-linecap':'round' });
+  const L = p.getTotalLength();
+  p.style.strokeDasharray = L; p.style.strokeDashoffset = L;
+  const lb = label((xa + xb) / 2, y - h / 2 - 16, mark, 18, 't');
+  lb.t.style.fill = color;
+  await all(anim(p, [{ strokeDashoffset:L }, { strokeDashoffset:0 }], 480), fadeIn(lb, 300, 200));
+}
+async function jumps(nl, frog, from, n, dir, color){
+  for (let k = 1; k <= n; k++){
+    const a = from + (k - 1) * dir, b = from + k * dir;
+    await all(
+      arcStep(nl, a, b, color, dir > 0 ? '+1' : '−1'),
+      hop(frog, nl.X(b), frog.y, nl.step * .65, 480),
+      say(`Bước ${k}…`, { speak:`bước ${WORDS[k - 1]}`, dur:650 })
+    );
+  }
+}
+
+/* ============ SLIDES ============ */
+const SLIDES = [
+  {
+    tag:'Mở đầu', title:'Toán học bằng hình',
+    async run(){
+      const t1 = label(400, 130, 'Toán học bằng hình', 58, 't');
+      const t2 = label(400, 192, 'Đếm số · Cộng · Trừ · Nhân · Chia', 24, 't muted');
+      await pop(t1); await fadeIn(t2, 400);
+      const syms = [['+', C.blue], ['−', C.orange], ['×', C.green], ['÷', C.purple]];
+      const items = syms.map(([s, c], i) => {
+        const g = item(250 + i * 100, 310, 'circle', c, 2);
+        el('text', { 'font-size':44, 'text-anchor':'middle', 'dominant-baseline':'central', class:'t onfill' }, g.inner).textContent = s;
+        return g;
+      });
+      await all(items.map((g, i) => pop(g, i * 220, 550)),
+        say('Chào các em! Hôm nay chúng ta sẽ học các phép toán cơ bản qua những hình khối sinh động.'));
+      await all(items.map((g, i) => hop(g, g.x, g.y, 28, 500).then(() => wait(0))));
+      await say('Chúng ta bắt đầu với việc đếm số nhé!');
+    }
+  },
+  {
+    tag:'Đếm số', title:'Đếm số từ 1 đến 10',
+    async run(){
+      await say('Đếm số là bước đầu tiên của toán học. Mỗi hình tròn là một đơn vị — hãy cùng đếm nhé!');
+      const big = label(400, 120, '0', 110, 't');
+      big.t.style.fill = C.blue;
+      await pop(big);
+      for (let i = 0; i < 10; i++){
+        const x = 400 + (i - 4.5) * 68;
+        const c = item(x, 285, 'circle', PALETTE[i % 5], 1.3);
+        const n = label(x, 340, String(i + 1), 20, 't muted');
+        big.t.textContent = i + 1;
+        big.t.style.fill = PALETTE[i % 5];
+        await all(pop(c), pop(n), pulse(big), say(`${i + 1}`, { speak: WORDS[i], dur: 700 }));
+      }
+      await say('Tổng cộng có mười hình tròn. Số cuối cùng ta đếm được cho biết có bao nhiêu đồ vật.');
+    }
+  },
+  {
+    tag:'Đếm số', title:'Chục và đơn vị',
+    async run(){
+      const frame = node(400, 225);
+      el('rect', { x:-134, y:-58, width:268, height:116, rx:12, class:'frame' }, frame.inner);
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 5; c++)
+        el('rect', { x:-130 + c * 52, y:-52 + r * 52, width:52, height:52, class:'frame-cell' }, frame.inner);
+      await all(fadeIn(frame), say('Đây là khung mười ô. Mỗi ô sẽ chứa một hình vuông.'));
+      const sq = [];
+      for (let i = 0; i < 10; i++){
+        const r = Math.floor(i / 5), c = i % 5;
+        sq.push(item(400 - 104 + c * 52, 225 - 26 + r * 52, 'square', C.yellow, .8));
+      }
+      for (let i = 0; i < 10; i++) await all(pop(sq[i], 0, 380), say(`${i + 1}`, { speak: WORDS[i], dur: 450 }));
+      await say('Đủ mười hình vuông rồi! Mười đơn vị gộp lại thành một chục.');
+      await fadeOut(frame, 400);
+      await all(sq.map((g, i) => moveTo(g, 250, 104 + i * 27, 850, i * 50)));
+      const bar = node(250, 104 + 4.5 * 27);
+      el('rect', { x:-20, y:-4.5 * 27 - 18, width:40, height:9 * 27 + 36, rx:8, class:'outline' }, bar.inner);
+      const l1 = label(250, 410, '1 chục = 10', 24, 't');
+      await all(fadeIn(bar), fadeIn(l1));
+      await say('Bây giờ thêm ba hình vuông lẻ nữa.');
+      const units = [340, 380, 420].map(x => item(x, 347, 'square', C.blue, .8));
+      for (let i = 0; i < 3; i++) await all(pop(units[i]), say(`${i + 1}`, { speak: WORDS[i], dur: 450 }));
+      const l2 = label(380, 410, '3 đơn vị', 24, 't');
+      await fadeIn(l2);
+      const e = eqn(610, 225, [['13', C.purple], [' = '], ['10', C.yellow], [' + '], ['3', C.blue]], 50);
+      await all(reveal(e), say('Vậy số mười ba gồm một chục và ba đơn vị.'));
+    }
+  },
+  {
+    tag:'Phép cộng', title:'Phép cộng — Gộp lại',
+    async run(){
+      const blue = [170, 220, 270].map(x => item(x, 220, 'circle', C.blue, 1.3));
+      const orange = [535, 585].map(x => item(x, 220, 'circle', C.orange, 1.3));
+      const lb = label(220, 285, '3', 30, 't'); lb.t.style.fill = C.blue;
+      const lo = label(560, 285, '2', 30, 't'); lo.t.style.fill = C.orange;
+      const plus = label(395, 220, '+', 60, 't');
+      await all(blue.map((g, i) => pop(g, i * 200)), say('Có 3 hình tròn màu xanh.'));
+      await pop(lb);
+      await pop(plus);
+      await all(orange.map((g, i) => pop(g, i * 200)), say('Thêm 2 hình tròn màu cam.'));
+      await pop(lo);
+      await say('Bây giờ ta gộp hai nhóm lại với nhau.');
+      await all(fadeOut(lb, 300), fadeOut(lo, 300), fadeOut(plus, 300));
+      await all([...blue, ...orange].map((g, i) => moveTo(g, 300 + i * 50, 240, 900, i * 60)));
+      const box = node(400, 240);
+      el('rect', { x:-135, y:-38, width:270, height:76, rx:38, class:'outline' }, box.inner);
+      await fadeIn(box, 400);
+      await say('Đếm lại tất cả:');
+      const g5 = [...blue, ...orange];
+      for (let i = 0; i < 5; i++){
+        const n = label(300 + i * 50, 300, String(i + 1), 22, 't muted');
+        await all(pop(n), pulse(g5[i]), say(`${i + 1}`, { speak: WORDS[i], dur: 500 }));
+      }
+      const e = eqn(400, 385, [['3', C.blue], [' + '], ['2', C.orange], [' = '], ['5', C.green]], 54);
+      await all(reveal(e), say('Ba cộng hai bằng năm. Phép cộng là gộp các nhóm lại để tìm tổng.'));
+    }
+  },
+  {
+    tag:'Phép cộng', title:'Phép cộng trên tia số',
+    async run(){
+      const nl = numberLine(320);
+      await fadeIn(nl.g);
+      const frog = item(nl.X(0), nl.y - 22, 'buddy', C.green, 1.15);
+      await all(pop(frog), say('Đây là tia số. Bạn ếch xanh đứng ở số 0.'));
+      await say('Đầu tiên, bạn ấy nhảy tới số 4.');
+      await hop(frog, nl.X(4), nl.y - 22, 90, 900);
+      const start = item(nl.X(4), nl.y, 'ring', C.blue, 1.5);
+      await pop(start);
+      await say('Cộng thêm 3 nghĩa là nhảy thêm 3 bước sang phải.');
+      await jumps(nl, frog, 4, 3, +1, C.orange);
+      const end = item(nl.X(7), nl.y, 'ring', C.green, 1.5);
+      await pop(end);
+      const e = eqn(400, 90, [['4', C.blue], [' + '], ['3', C.orange], [' = '], ['7', C.green]], 54);
+      await all(reveal(e), say('Bạn ếch dừng lại ở số 7. Vậy bốn cộng ba bằng bảy.'));
+    }
+  },
+  {
+    tag:'Phép trừ', title:'Phép trừ — Bớt đi',
+    async run(){
+      const xs = Array.from({ length: 7 }, (_, i) => 400 + (i - 3) * 82);
+      const tris = xs.map(x => item(x, 220, 'tri', C.green, 1.4));
+      await all(tris.map((g, i) => pop(g, i * 150)), say('Có 7 hình tam giác màu xanh.'));
+      await say('Bây giờ ta bớt đi 3 hình.');
+      for (let i = 6; i >= 4; i--){
+        const gh = item(xs[i], 220, 'tri', 'none', 1.4);
+        gh.inner.style.opacity = 1;
+        await all(fadeOut(tris[i], 650, -110), say(`Bớt ${7 - i}`, { speak: `bớt ${WORDS[6 - i]}`, dur: 500 }));
+      }
+      await say('Đếm những hình còn lại:');
+      for (let i = 0; i < 4; i++){
+        const n = label(xs[i], 285, String(i + 1), 22, 't muted');
+        await all(pop(n), pulse(tris[i]), say(`${i + 1}`, { speak: WORDS[i], dur: 500 }));
+      }
+      const e = eqn(400, 380, [['7', C.green], [' − '], ['3', C.red], [' = '], ['4', C.green]], 54);
+      await all(reveal(e), say('Còn lại 4 hình. Vậy bảy trừ ba bằng bốn.'));
+    }
+  },
+  {
+    tag:'Phép trừ', title:'Phép trừ trên tia số',
+    async run(){
+      const nl = numberLine(320);
+      await fadeIn(nl.g);
+      const frog = item(nl.X(9), nl.y - 22, 'buddy', C.green, 1.15);
+      const start = item(nl.X(9), nl.y, 'ring', C.blue, 1.5);
+      await all(pop(frog), pop(start), say('Lần này bạn ếch bắt đầu ở số 9.'));
+      await say('Trừ 4 nghĩa là nhảy lùi 4 bước về bên trái.');
+      await jumps(nl, frog, 9, 4, -1, C.red);
+      const end = item(nl.X(5), nl.y, 'ring', C.green, 1.5);
+      await pop(end);
+      const e = eqn(400, 90, [['9', C.blue], [' − '], ['4', C.red], [' = '], ['5', C.green]], 54);
+      await all(reveal(e), say('Bạn ếch dừng ở số 5. Chín trừ bốn bằng năm.'));
+      const note = label(400, 150, 'Kiểm tra lại: 5 + 4 = 9', 24, 't muted');
+      await all(fadeIn(note), say('Phép trừ là phép ngược của phép cộng: năm cộng bốn lại bằng chín.'));
+    }
+  },
+  {
+    tag:'Phép nhân', title:'Phép nhân — Cộng lặp lại',
+    async run(){
+      await say('Phép nhân giúp ta đếm nhanh các nhóm bằng nhau.');
+      const bx = [170, 400, 630];
+      const offs = [[-32, -28], [32, -28], [-32, 28], [32, 28]];
+      for (let g = 0; g < 3; g++){
+        const box = node(bx[g], 220);
+        el('rect', { x:-95, y:-70, width:190, height:140, rx:18, class:'box' }, box.inner);
+        await pop(box, 0, 400);
+        const stars = offs.map(([dx, dy]) => item(bx[g] + dx, 220 + dy, 'star', PALETTE[g], 1.15));
+        await all(stars.map((s, i) => pop(s, i * 120)), say(`Nhóm ${g + 1} có 4 ngôi sao.`));
+        const n = label(bx[g], 318, '4', 30, 't'); n.t.style.fill = PALETTE[g];
+        await pop(n);
+      }
+      const e1 = eqn(400, 75, [['4', C.blue], [' + '], ['4', C.orange], [' + '], ['4', C.green], [' = '], ['12']], 46);
+      await all(reveal(e1, 200), say('Cộng lại: bốn cộng bốn cộng bốn bằng mười hai.'));
+      const e2 = eqn(400, 390, [['3', C.purple], [' × '], ['4'], [' = '], ['12', C.green]], 54);
+      await all(reveal(e2), say('Có 3 nhóm, mỗi nhóm 4 ngôi sao. Ta viết gọn là: ba nhân bốn bằng mười hai.'));
+    }
+  },
+  {
+    tag:'Phép nhân', title:'Phép nhân — Hình chữ nhật',
+    async run(){
+      const grid = node(400, 225);
+      grid.inner.style.opacity = 1;
+      const rows = [];
+      for (let r = 0; r < 3; r++){
+        rows.push(Array.from({ length: 5 }, (_, c) => item((c - 2) * 46, (r - 1) * 46, 'square', PALETTE[r], 1.2, grid.inner)));
+      }
+      await say('Xếp các hình vuông thành hàng và cột, ta được một hình chữ nhật.');
+      const sums = [];
+      for (let r = 0; r < 3; r++){
+        await all(rows[r].map((g, i) => pop(g, i * 90, 380)), say(`Hàng ${r + 1}: 5 hình vuông.`, { dur: 900 }));
+        const s = label(560, 225 + (r - 1) * 46, `→ ${(r + 1) * 5}`, 24, 't muted');
+        sums.push(s); await fadeIn(s, 300);
+      }
+      const top = label(400, 135, '5 cột', 24, 't'); top.t.style.fill = C.purple;
+      const left = label(235, 225, '3 hàng', 24, 't'); left.t.style.fill = C.purple;
+      await all(fadeIn(top), fadeIn(left));
+      const e = eqn(400, 390, [['3', C.purple], [' × '], ['5', C.purple], [' = '], ['15', C.green]], 54);
+      await all(reveal(e), say('Ba hàng, mỗi hàng năm hình: ba nhân năm bằng mười lăm.'));
+      await say('Bây giờ ta xoay hình chữ nhật một góc vuông…');
+      await all(sums.map(s => fadeOut(s, 300)), fadeOut(top, 300), fadeOut(left, 300), fadeOut(e, 300));
+      await anim(grid.inner, [{ transform:'rotate(0deg)' }, { transform:'rotate(90deg)' }], 1300, { easing:'cubic-bezier(.6,0,.3,1)' });
+      const top2 = label(400, 90, '3 cột', 24, 't'); top2.t.style.fill = C.purple;
+      const left2 = label(285, 225, '5 hàng', 24, 't'); left2.t.style.fill = C.purple;
+      await all(fadeIn(top2), fadeIn(left2));
+      const e2 = eqn(620, 210, [['5', C.purple], [' × '], ['3', C.purple], [' = '], ['15', C.green]], 46);
+      await reveal(e2);
+      const note = label(620, 268, 'Đổi chỗ, tích không đổi', 20, 't muted');
+      await all(fadeIn(note), say('Bây giờ là năm hàng, mỗi hàng ba hình — vẫn là mười lăm! Đổi chỗ các thừa số, tích không thay đổi.'));
+    }
+  },
+  {
+    tag:'Phép chia', title:'Phép chia — Chia đều',
+    async run(){
+      const pile = [];
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++)
+        pile.push(item(400 + (c - 1.5) * 40, 95 + r * 40, 'circle', C.orange, 1.1));
+      await all(pile.map((g, i) => pop(g, i * 60, 350)), say('Có 12 hình tròn cần chia đều cho 3 cái đĩa.'));
+      const px = [170, 400, 630];
+      const plates = px.map(x => {
+        const p = toBack(node(x, 330));
+        el('ellipse', { rx:92, ry:66, class:'plate' }, p.inner);
+        return p;
+      });
+      await all(plates.map((p, i) => pop(p, i * 150)));
+      await say('Ta lần lượt đặt vào mỗi đĩa một hình — giống như chia bánh kẹo cho các bạn.');
+      const offs = [[-24, -20], [24, -20], [-24, 20], [24, 20]];
+      for (let i = 0; i < 12; i++){
+        const p = i % 3, slot = Math.floor(i / 3);
+        const jobs = [moveTo(pile[i], px[p] + offs[slot][0], 330 + offs[slot][1], 420)];
+        if (p === 0) jobs.push(say(`Lượt ${slot + 1}: mỗi đĩa thêm một hình.`, { dur: 0 }));
+        await all(jobs);
+      }
+      await wait(300);
+      const ns = px.map(x => label(x, 418, '4', 28, 't'));
+      await all(ns.map((n, i) => pop(n, i * 150)), say('Hết hình rồi! Mỗi đĩa có đúng 4 hình tròn.'));
+      const e = eqn(400, 135, [['12', C.orange], [' ÷ '], ['3', C.purple], [' = '], ['4', C.green]], 58);
+      await all(reveal(e), say('Vậy mười hai chia ba bằng bốn. Phép chia là chia đều thành các phần bằng nhau.'));
+    }
+  },
+  {
+    tag:'Phép chia', title:'Phép chia có dư',
+    async run(){
+      const sq = Array.from({ length: 14 }, (_, i) => item(400 + (i - 6.5) * 42, 110, 'square', C.blue, .78));
+      await all(sq.map((g, i) => pop(g, i * 50, 340)), say('Có 14 hình vuông. Ta xếp thành các nhóm, mỗi nhóm 4 hình.'));
+      const bx = [150, 330, 510];
+      for (let g = 0; g < 3; g++){
+        const box = toBack(node(bx[g], 270));
+        el('rect', { x:-78, y:-36, width:156, height:72, rx:14, class:'box' }, box.inner);
+        await pop(box, 0, 350);
+        await all(
+          [0, 1, 2, 3].map(k => moveTo(sq[g * 4 + k], bx[g] + (k - 1.5) * 34, 270, 650, k * 90)),
+          say(`Nhóm ${g + 1}.`, { speak: `nhóm ${WORDS[g]}`, dur: 700 })
+        );
+        const n = label(bx[g], 330, '4', 24, 't muted'); await pop(n);
+      }
+      await say('Còn lại 2 hình — không đủ 4 để tạo thêm một nhóm nữa.');
+      const rem = toBack(node(680, 270));
+      el('rect', { x:-50, y:-36, width:100, height:72, rx:14, class:'outline-red' }, rem.inner);
+      await fadeIn(rem, 400);
+      await all(moveTo(sq[12], 663, 270, 650), moveTo(sq[13], 697, 270, 650, 90));
+      const d = label(680, 330, 'dư 2', 24, 't'); d.t.style.fill = C.red;
+      await pop(d);
+      const e = eqn(400, 400, [['14', C.blue], [' ÷ '], ['4'], [' = '], ['3', C.green], [' dư '], ['2', C.red]], 48);
+      await all(reveal(e, 200), say('Mười bốn chia bốn được ba, dư hai. Kiểm tra: ba nhân bốn bằng mười hai, cộng hai bằng mười bốn.'));
+    }
+  },
+  {
+    tag:'Tổng kết', title:'Tổng kết bốn phép toán',
+    async run(){
+      const cards = [
+        [225, 140, '+', 'Phép cộng', 'Gộp lại', C.blue],
+        [575, 140, '−', 'Phép trừ', 'Bớt đi', C.orange],
+        [225, 270, '×', 'Phép nhân', 'Cộng lặp lại', C.green],
+        [575, 270, '÷', 'Phép chia', 'Chia đều', C.purple]
+      ].map(([x, y, sym, name, desc, col]) => {
+        const g = node(x, y);
+        el('rect', { x:-135, y:-50, width:270, height:100, rx:18, class:'box' }, g.inner);
+        el('circle', { cx:-85, r:30, fill: col }, g.inner);
+        el('text', { x:-85, 'font-size':38, 'text-anchor':'middle', 'dominant-baseline':'central', class:'t onfill' }, g.inner).textContent = sym;
+        el('text', { x:25, y:-14, 'font-size':24, 'text-anchor':'middle', 'dominant-baseline':'central', class:'t' }, g.inner).textContent = name;
+        el('text', { x:25, y:18, 'font-size':18, 'text-anchor':'middle', 'dominant-baseline':'central', class:'t muted' }, g.inner).textContent = desc;
+        return g;
+      });
+      await say('Cùng nhìn lại bốn phép toán chúng ta đã học.');
+      await all(pop(cards[0]), say('Phép cộng là gộp các nhóm lại.'));
+      await all(pop(cards[1]), say('Phép trừ là bớt đi một phần.'));
+      const inv1 = label(400, 140, '⇄', 34, 't'); const t1 = label(400, 172, 'ngược nhau', 14, 't muted');
+      await all(pop(inv1), fadeIn(t1));
+      await all(pop(cards[2]), say('Phép nhân là cộng lặp lại các nhóm bằng nhau.'));
+      await all(pop(cards[3]), say('Phép chia là chia đều thành các phần bằng nhau.'));
+      const inv2 = label(400, 270, '⇄', 34, 't'); const t2 = label(400, 302, 'ngược nhau', 14, 't muted');
+      await all(pop(inv2), fadeIn(t2));
+      const e = eqn(400, 390, [['3 × 4 = 12', C.green], ['   ⇄   ', 'var(--muted)'], ['12 ÷ 3 = 4', C.purple]], 38);
+      await all(reveal(e, 300), say('Cộng và trừ ngược nhau, nhân và chia cũng ngược nhau. Cảm ơn các em đã theo dõi!'));
+    }
+  }
+];
+
+/* ============ PLAYER ============ */
+const dots = $('dots');
+SLIDES.forEach((s, i) => {
+  const b = document.createElement('button');
+  b.title = `${i + 1}. ${s.title}`;
+  b.onclick = () => goTo(i);
+  dots.appendChild(b);
+});
+
+function updateUI(){
+  const s = SLIDES[idx];
+  $('chip').textContent = `${s.tag} · ${idx + 1}/${SLIDES.length}`;
+  $('title').textContent = s.title;
+  document.title = 'Phép Toán Hình Học';
+  $('bar').style.width = `${(idx + 1) / SLIDES.length * 100}%`;
+  [...dots.children].forEach((b, i) => { b.className = i === idx ? 'on' : i < idx ? 'done' : ''; });
+}
+
+function goTo(i){
+  idx = Math.max(0, Math.min(SLIDES.length - 1, i));
+  token++;
+  active.forEach(a => a.cancel()); active.clear();
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  stage.replaceChildren();
+  finished = false;
+  updateUI();
+  run();
+}
+
+async function run(){
+  try {
+    await SLIDES[idx].run();
+    finished = true;
+    if (idx === SLIDES.length - 1){
+      await wait(1500);
+      $('caption').textContent = 'Hết bài! Nhấn ↻ để xem lại slide, hoặc chọn một chấm tròn để mở slide bất kỳ.';
+      return;
+    }
+    await advanceLater();
+  } catch (e) {
+    if (!(e instanceof Cancel)) console.error(e);
+  }
+}
+async function advanceLater(){
+  await wait(2200);
+  if ($('auto').checked && idx < SLIDES.length - 1) goTo(idx + 1);
+}
+
+function setPaused(p){
+  paused = p;
+  active.forEach(a => p ? a.pause() : a.play());
+  if ('speechSynthesis' in window) p ? speechSynthesis.pause() : speechSynthesis.resume();
+  $('play').textContent = p ? '▶︎' : '❚❚';
+  $('wrap').classList.toggle('paused', p);
+}
+
+$('prev').onclick = () => goTo(idx - 1);
+$('next').onclick = () => goTo(idx + 1);
+$('replay').onclick = () => { setPaused(false); goTo(idx); };
+$('play').onclick = () => setPaused(!paused);
+$('speed').onchange = e => { SPEED = parseFloat(e.target.value); };
+$('auto').onchange = e => { if (e.target.checked && finished) advanceLater().catch(() => {}); };
+$('voice').onchange = e => { if (!e.target.checked && 'speechSynthesis' in window) speechSynthesis.cancel(); };
+$('fs').onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else $('deck').requestFullscreen?.();
+};
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight' || e.key === 'PageDown'){ e.preventDefault(); goTo(idx + 1); }
+  else if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); goTo(idx - 1); }
+  else if (e.key === ' '){ e.preventDefault(); setPaused(!paused); }
+  else if (e.key === 'r' || e.key === 'R'){ setPaused(false); goTo(idx); }
+  else if (e.key === 'f' || e.key === 'F'){ $('fs').click(); }
+});
+if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => {};
+
+goTo(0);
+</script>
+</body>
+</html>
