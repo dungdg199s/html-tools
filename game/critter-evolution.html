@@ -1222,69 +1222,80 @@ function drawMetalCrown(tier) {
   poly(pts, metalFill(tier, -33, -22), TIERS[tier].d, 1.2);
   ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8, -23.5); ctx.lineTo(8, -23.5); ctx.stroke();
 }
-// legend aura lives on the ground under the feet so it doesn't cover the neighbours
+// legend aura: glowing light rings on the ground (additive), so it lights up without covering the neighbours
+const LIGHT = ['#ffe9b8', '#7cc4ff', '#ffc94a', '#ff5a3c', '#c47cff'];
+const hexA = (hex, a) => hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0');
 function drawLegendAura(accs, tier) {
-  const T = TIERS[tier], t = S.time, m = METAL[tier];
-  if (tier >= 2) {   // thin light pillar
-    const g = ctx.createLinearGradient(0, -80, 0, 12);
-    g.addColorStop(0, T.c + '00'); g.addColorStop(.75, T.c + '3a'); g.addColorStop(1, T.c + '00');
-    ctx.fillStyle = g; const w = 10 + 3 * Math.sin(t * 5); ctx.fillRect(-w / 2, -80, w, 92);
+  const t = S.time, L = LIGHT[tier], gy = 13, R = 30 + 4 * tier, SQ = .3;
+  // dark pool first so the light keeps its colour on the bright grass
+  ctx.save(); ctx.translate(0, gy); ctx.scale(1, SQ + .05);
+  let d = ctx.createRadialGradient(0, 0, 4, 0, 0, R + 16);
+  d.addColorStop(0, 'rgba(25,12,30,.55)'); d.addColorStop(.7, 'rgba(25,12,30,.3)'); d.addColorStop(1, 'rgba(25,12,30,0)');
+  circle(0, 0, R + 16, d); ctx.restore();
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  // soft pool of light
+  ctx.save(); ctx.translate(0, gy); ctx.scale(1, SQ);
+  let g = ctx.createRadialGradient(0, 0, 2, 0, 0, R + 10);
+  g.addColorStop(0, hexA(L, .35)); g.addColorStop(.5, hexA(L, .14)); g.addColorStop(1, hexA(L, 0));
+  circle(0, 0, R + 10, g);
+  // rings of light streaks, each spinning at its own speed
+  const rings = 3 + Math.min(2, tier);
+  for (let k = 0; k < rings; k++) {
+    const r = R * (.55 + .45 * k / (rings - 1)), sp = (k % 2 ? -1 : 1) * (1.1 + .35 * k + .2 * tier);
+    for (let n = 0; n < 3; n++) {
+      const a0 = t * sp + n * 2.1 + k * 1.3, len = 1.1 + .6 * Math.sin(t * 1.7 + n + k);
+      const col = n === 1 && k % 2 ? accs[k % 2] : L;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = hexA(col, .3); ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(0, 0, r, a0, a0 + len); ctx.stroke();
+      ctx.strokeStyle = hexA(L, .9); ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.arc(0, 0, r, a0 + len * .1, a0 + len * .9); ctx.stroke();
+      ctx.strokeStyle = hexA('#ffffff', .55); ctx.lineWidth = .9;
+      ctx.beginPath(); ctx.arc(0, 0, r, a0 + len * .15, a0 + len * .85); ctx.stroke();
+    }
   }
-  ctx.save(); ctx.translate(0, 13); ctx.scale(1, .34);
-  const gr = 30 + 4 * tier, g = ctx.createRadialGradient(0, 0, 4, 0, 0, gr);
-  g.addColorStop(0, '#ffffffaa'); g.addColorStop(.35, (tier ? T.c : accs[0]) + '88'); g.addColorStop(1, accs[1] + '00');
-  circle(0, 0, gr, g);
-  // metal rim with a moving specular highlight
-  const rim = ctx.createLinearGradient(-gr, 0, gr, 0), sh = (Math.sin(t * 1.6) + 1) / 2;
-  rim.addColorStop(0, m[2]); rim.addColorStop(Math.max(0, sh - .15), m[1]); rim.addColorStop(sh, '#ffffff'); rim.addColorStop(Math.min(1, sh + .15), m[1]); rim.addColorStop(1, m[2]);
-  circle(0, 0, gr - 6, null, rim, 4);
-  const rot = t * (1.5 + .4 * tier);
-  ctx.lineWidth = 3; ctx.lineCap = 'round';
-  for (let i = 0; i < 12; i++) {
-    ctx.beginPath(); ctx.strokeStyle = accs[i % 2];
-    ctx.arc(0, 0, gr - 13, rot + i * Math.PI / 6, rot + i * Math.PI / 6 + .3); ctx.stroke();
-  }
-  if (tier >= 1) {
-    ctx.strokeStyle = T.c; ctx.lineWidth = 2.5;
-    for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.arc(0, 0, gr + 1, -rot * 1.3 + i * Math.PI / 4, -rot * 1.3 + i * Math.PI / 4 + .4); ctx.stroke(); }
-  }
-  if (tier >= 4) {   // rune hexagram
-    ctx.save(); ctx.rotate(t * .8); ctx.strokeStyle = T.c; ctx.lineWidth = 2;
+  if (tier >= 4) {   // faint rune of light
+    ctx.save(); ctx.rotate(t * .8); ctx.strokeStyle = hexA(L, .55); ctx.lineWidth = 1.6;
     for (const off of [0, Math.PI / 3]) {
       ctx.beginPath();
-      for (let i = 0; i <= 3; i++) { const a = off + i * Math.PI * 2 / 3; i ? ctx.lineTo(Math.cos(a) * (gr - 13), Math.sin(a) * (gr - 13)) : ctx.moveTo(Math.cos(a) * (gr - 13), Math.sin(a) * (gr - 13)); }
+      for (let i = 0; i <= 3; i++) { const a = off + i * Math.PI * 2 / 3; i ? ctx.lineTo(Math.cos(a) * R * .75, Math.sin(a) * R * .75) : ctx.moveTo(Math.cos(a) * R * .75, Math.sin(a) * R * .75); }
       ctx.stroke();
     }
     ctx.restore();
   }
   ctx.restore();
-  if (tier >= 3) {   // metal orbs skimming the ground
-    for (let i = 0; i < 3; i++) {
-      const a = t * 3 + i * Math.PI * 2 / 3, ox = Math.cos(a) * (gr - 2), oy = 13 + Math.sin(a) * (gr - 2) * .34;
-      for (let k = 3; k >= 1; k--) {
-        const aa = a - k * .14; ctx.globalAlpha = (1 - k / 4) * .6;
-        circle(Math.cos(aa) * (gr - 2), 13 + Math.sin(aa) * (gr - 2) * .34, 3.5 - k * .5, T.c);
-      }
-      ctx.globalAlpha = 1;
-      const og = ctx.createRadialGradient(ox - 1.2, oy - 1.4, .5, ox, oy, 4.5);
-      og.addColorStop(0, '#ffffff'); og.addColorStop(.45, m[1]); og.addColorStop(1, m[2]);
-      circle(ox, oy, 4.5, og, TIERS[tier].d, 1);
+  // bright flare on the near edge of the ring
+  ctx.save(); ctx.translate(0, gy + R * SQ * .8); ctx.scale(1, .22);
+  const fl = 1 + .15 * Math.sin(t * 7);
+  g = ctx.createRadialGradient(0, 0, 1, 0, 0, R * .9 * fl);
+  g.addColorStop(0, 'rgba(255,255,255,.75)'); g.addColorStop(.3, hexA(L, .5)); g.addColorStop(1, hexA(L, 0));
+  circle(0, 0, R * .9 * fl, g);
+  ctx.restore();
+  // light rays rising from the ring
+  if (tier >= 2) {
+    for (let i = 0; i < 4 + tier; i++) {
+      const a = i * 2.39 + t * .3, x = Math.cos(a) * R * .8, y = gy + Math.sin(a) * R * SQ * .8;
+      const h = 22 + 10 * tier * (.6 + .4 * Math.sin(t * 3 + i * 1.7));
+      g = ctx.createLinearGradient(0, y, 0, y - h);
+      g.addColorStop(0, hexA(L, .45)); g.addColorStop(1, hexA(L, 0));
+      ctx.fillStyle = g; ctx.fillRect(x - 1.2, y - h, 2.4, h);
     }
   }
-  if (tier >= 4) {   // short sparks crackling off the ground
-    for (let i = 0; i < 3; i++) {
-      if (Math.random() < .55) continue;
-      const a = rnd(0, 7); ctx.beginPath(); ctx.moveTo(Math.cos(a) * 8, 13 + Math.sin(a) * 3);
-      for (let k = 1; k <= 3; k++) ctx.lineTo(Math.cos(a) * (8 + k * 9) + rnd(-3, 3), 13 + Math.sin(a) * (3 + k * 3) - k * 3 + rnd(-3, 3));
-      ctx.strokeStyle = Math.random() < .5 ? '#ffffff' : T.c; ctx.lineWidth = 1.5; ctx.stroke();
+  // drifting golden dust
+  for (let i = 0; i < 6 + 3 * tier; i++) {
+    const seed = i * 12.9898, life = (t * (.35 + (i % 5) * .07) + (seed % 1)) % 1;
+    const a = seed + i, x = Math.cos(a) * R * (.4 + .6 * ((i * .37) % 1)), y = gy + Math.sin(a) * R * SQ - life * (26 + 8 * tier);
+    circle(x + Math.sin(t * 2 + i) * 2, y, .8 + (i % 3) * .5, hexA(i % 4 ? L : '#ffffff', (1 - life) * .9));
+  }
+  if (tier >= 4) {   // crackles of light
+    for (let i = 0; i < 2; i++) {
+      if (Math.random() < .5) continue;
+      const a = rnd(0, 7); ctx.beginPath(); ctx.moveTo(Math.cos(a) * 8, gy + Math.sin(a) * 3);
+      for (let k = 1; k <= 3; k++) ctx.lineTo(Math.cos(a) * (8 + k * 9) + rnd(-3, 3), gy + Math.sin(a) * (3 + k * 3) - k * 3 + rnd(-3, 3));
+      ctx.strokeStyle = hexA('#ffffff', .8); ctx.lineWidth = 1.3; ctx.stroke();
     }
   }
-  for (let i = 0; i < 4 + 2 * tier; i++) {   // small metal glints around the feet
-    const a = -t * 1.2 + i * Math.PI * 2 / (4 + 2 * tier), px = Math.cos(a) * (gr - 6), py = 13 + Math.sin(a) * (gr - 6) * .34, r = 2.2 + Math.sin(t * 6 + i);
-    ctx.globalAlpha = .55 + .45 * Math.sin(t * 5 + i * 2);
-    poly([[px, py - r * 1.8], [px + r * .35, py - r * .35], [px + r * 1.8, py], [px + r * .35, py + r * .35], [px, py + r * 1.8], [px - r * .35, py + r * .35], [px - r * 1.8, py], [px - r * .35, py - r * .35]], i % 2 ? '#ffffff' : m[1]);
-  }
-  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 function drawFusing(x, y, c, s) {
   const t = 1 - c.fuseT / .7;
