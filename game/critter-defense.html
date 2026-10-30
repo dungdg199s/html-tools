@@ -180,10 +180,15 @@ const TYPES = {
   piggy:  { vi: 'Heo Đất',    w: 8,  unlock: 3, dmg: 0,   rate: 0,    range: 0,   accent: '#ff9ac2' },
   bolt:   { vi: 'Sấm Sét',    w: 10, unlock: 5, dmg: .75, rate: 1.15, range: -15, accent: '#ffd23f' },
   drum:   { vi: 'Trống Hội',  w: 8,  unlock: 5, dmg: 0,   rate: 0,    range: 0,   accent: '#b5651d' },
+  // melee: hit what their weapon physically reaches
+  sword:  { vi: 'Kiếm Xoay',  w: 14, unlock: 2, dmg: .9,  rate: 0,    range: 0,   accent: '#c0c8d0', melee: true },
+  spear:  { vi: 'Giáo Đâm',   w: 10, unlock: 4, dmg: 3.2, rate: 0,    range: 0,   accent: '#3c9a2a', melee: true },
+  hammer: { vi: 'Búa Tạ',     w: 9,  unlock: 6, dmg: 2.6, rate: 0,    range: 0,   accent: '#8a96a3', melee: true },
+  shield: { vi: 'Khiên Gai',  w: 7,  unlock: 7, dmg: .35, rate: 0,    range: 0,   accent: '#a0622a', melee: true },
 };
 const critDmg = l => Math.round(Math.pow(2.25, l - 1));
 const critRate = l => Math.max(.4, .85 - .03 * l);
-const critRange = l => 175 + l * 6;
+const critRange = l => 215 + l * 6;
 const tDmg = (k, l, buff = 0) => Math.max(1, Math.round(critDmg(l) * TYPES[k].dmg * (1 + buff)));
 const tRate = (k, l) => critRate(l) * TYPES[k].rate;
 const tRange = (k, l) => (critRange(l) + TYPES[k].range) * K;
@@ -600,17 +605,21 @@ function pickTarget(s, rg, pref, excl) {
 
 // ---------- legends ----------
 const KORD = Object.keys(TYPES);
-const SHORT = { leek: 'Hành', chili: 'Ớt', ice: 'Băng', durian: 'Sầu Riêng', piggy: 'Heo', bolt: 'Sấm', drum: 'Trống' };
+const SHORT = { leek: 'Hành', chili: 'Ớt', ice: 'Băng', durian: 'Sầu Riêng', piggy: 'Heo', bolt: 'Sấm', drum: 'Trống', sword: 'Kiếm', spear: 'Giáo', hammer: 'Búa', shield: 'Khiên' };
 const LEGENDS = {
   'chili+ice': 'Băng Hỏa Long', 'durian+bolt': 'Lôi Độc Thần', 'ice+bolt': 'Bão Tuyết Sấm', 'leek+chili': 'Hành Phi',
   'chili+durian': 'Bom Thối', 'piggy+drum': 'Thần Tài Lễ Hội', 'leek+leek': 'Thần Hành',
+  'sword+sword': 'Kiếm Thánh', 'ice+sword': 'Băng Kiếm', 'bolt+sword': 'Lôi Kiếm', 'chili+hammer': 'Búa Dung Nham',
+  'hammer+hammer': 'Thần Chùy', 'spear+spear': 'Thương Thần',
 };
 const LEG_INFO = {
   'chili+ice': 'quái bị chậm nhận +25% ST', 'durian+bolt': '+2 bước nhảy, không giảm ST', 'ice+bolt': '12% đóng băng',
   'leek+chili': 'phát thứ 2 đủ ST và nổ', 'chili+durian': 'nổ to hơn, độc x1.5', 'piggy+drum': '+15% tốc đánh cho lính quanh', 'leek+leek': 'ném 3 phát',
+  'sword+sword': '2 vòng kiếm', 'ice+sword': 'kiếm làm chậm', 'hammer+hammer': 'choáng x2', 'spear+spear': 'đâm xuyên 3',
 };
 const ATK = ['leek', 'chili', 'ice', 'durian', 'bolt'];
-const PRIO = ['bolt', 'chili', 'durian', 'ice', 'leek', 'drum', 'piggy'];
+const PRIO = ['bolt', 'chili', 'durian', 'ice', 'leek', 'drum', 'piggy', 'sword', 'spear', 'hammer', 'shield'];
+const MELEE = KORD.filter(k => TYPES[k].melee);
 const legKinds = ks => ks.slice().sort((a, b) => KORD.indexOf(a) - KORD.indexOf(b));
 function legendName(key) {
   if (LEGENDS[key]) return LEGENDS[key];
@@ -638,7 +647,7 @@ function mergeKind(c, t) {
 }
 function legendStats(c) {
   const P = Math.pow(1.6, c.star - 1), atk = c.kinds.filter(k => ATK.includes(k));
-  const dsum = c.kinds.reduce((s, k) => s + TYPES[k].dmg, 0);
+  const dsum = c.kinds.reduce((s, k) => s + (TYPES[k].melee ? 0 : TYPES[k].dmg), 0);
   return {
     P, atk, dmg: Math.round(critDmg(MAXL) * dsum * 1.4 * P * (1 + c.buff)),
     rate: atk.length ? .85 * Math.min(...atk.map(k => tRate(k, MAXL))) : 1,
@@ -668,6 +677,151 @@ function fuseBoom(c, s) {
   S.shake = 6;
   banner('✨ ' + legendName(c.key) + ' ✨', 2.2);
   [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, .15, 'triangle', .07), i * 90));
+}
+
+// ---------- melee ----------
+// Melee critters hit whatever their weapon physically reaches, so they work best near the track
+// but nothing stops you from placing them anywhere. They also chop barrels and jars in reach.
+const swordGeom = l => ({ N: 1 + Math.ceil(l / 2), R: 60 + 2 * l, BL: 24 + l, w: 4 + .5 * l });
+const wrapA = a => ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+function swordRings(c, l) {
+  const g = swordGeom(l), N = g.N + (c.legend ? c.star - 1 : 0);
+  return c.key === 'sword+sword' ? [{ R: g.R, dir: 1, N, g }, { R: g.R - 16, dir: -1, N, g }] : [{ R: g.R, dir: 1, N, g }];
+}
+// damage the barrel / jar in slot i by n (shared by tapping and melee critters)
+function hitObstacle(i, n) {
+  const c = S.grid[i], s = SLOTS[i];
+  c.hp -= n; c.shake = 1; beep(150, .06, 'square', .05);
+  burst(s.x, s.y - 10, 4, ['#d98a2b', '#8a4e16']);
+  if (c.hp <= 0) {
+    S.grid[i] = null;
+    if (c.gold) { S.coins += c.gold; text(s.x, s.y - 24, '+' + fmt(c.gold), '#ffd23f'); }
+    burst(s.x, s.y - 6, 18, ['#d98a2b', '#8a4e16', '#ffd23f']);
+    beep(500, .2, 'triangle', .06, 500); hud();
+  }
+}
+// obstacle slots whose centre lies within reach of x,y
+const obstaclesNear = (x, y, reach) => SLOTS.map((o, j) => j < NA && S.grid[j] && !isCrit(S.grid[j]) && Math.hypot(o.x - x, o.y - y) <= reach ? j : -1).filter(j => j >= 0);
+function meleeTick(c, s, k, l, dmg, dt, eff) {
+  const hs = 1 - (c.haste || 0);
+  c.mcd = c.mcd || {};
+  if (k === 'sword') {
+    c.hitCd = c.hitCd || new WeakMap();
+    const rings = swordRings(c, l), g = rings[0].g, prev = c.spin || 0;
+    c.spin = prev + g.w * dt;
+    const sweep = g.w * dt;
+    const blade = (R, dir, N, qx, qy, rad) => {
+      const dx = qx - s.x, dy = qy - s.y, dq = Math.hypot(dx, dy);
+      if (Math.abs(dq - R) > g.BL / 2 + rad) return false;
+      const aq = Math.atan2(dy, dx), w = (6 + rad) / Math.max(dq, 1);
+      for (let b = 0; b < N; b++) {
+        const th = dir * prev + b * Math.PI * 2 / N;
+        const d = dir > 0 ? wrapA(aq - th) : wrapA(th - aq);
+        if (d >= -w && d <= sweep + w) return true;
+      }
+      return false;
+    };
+    for (const z of S.zombies) {
+      if (z.dead || z.phased || z.immune || (c.hitCd.get(z) || 0) > S.time) continue;
+      const q = zPos(z);
+      if (rings.some(r => blade(r.R, r.dir, r.N, q.x, q.y - 8 * z.r, 12 * z.r))) {
+        applyEff(z, dmg, eff); c.hitCd.set(z, S.time + .4 * hs);
+        if (S.parts.length < 250) burst(q.x, q.y - 10, 3, ['#ffffff', '#dfe6ee', '#ffd23f']);
+        S.fx.push({ kind: 'slash', x: q.x, y: q.y - 10, a: Math.atan2(q.y - s.y, q.x - s.x), life: .15, max: .15 });
+      }
+    }
+    for (const j of obstaclesNear(s.x, s.y, rings[0].R + g.BL / 2 + 16)) {
+      const o = S.grid[j];
+      if ((c.hitCd.get(o) || 0) > S.time) continue;
+      if (rings.some(r => blade(r.R, r.dir, r.N, SLOTS[j].x, SLOTS[j].y, 16))) { hitObstacle(j, 1); c.hitCd.set(o, S.time + .4 * hs); }
+    }
+    return;
+  }
+  if ((c.mcd[k] = (c.mcd[k] || 0) - dt) > 0) return;
+  if (k === 'spear') {
+    const reach = 80 + 3 * l, t = pickTarget(s, reach);
+    const obs = obstaclesNear(s.x, s.y, reach);
+    if (!t && !obs.length) { c.mcd[k] = .1; return; }
+    c.mcd[k] = critRate(l) * 1.1 * hs; c.throwT = 1; c.bounce = 1;
+    c.pokes = (c.pokes || 0) + 1;
+    if (!t) { hitObstacle(obs[0], 1); thrust(s, SLOTS[obs[0]]); return; }
+    const p = zPos(t); thrust(s, { x: p.x, y: p.y - 12 * t.r });
+    applyEff(t, dmg, Object.assign({}, eff, { pierce: 1 }));
+    // every 3rd poke (every poke for Thương Thần) skewers the ones right behind
+    const extra = c.key === 'spear+spear' ? 2 : c.pokes % 3 === 0 ? 1 : 0;
+    S.zombies.filter(z => !z.dead && z !== t && z.d < t.d && t.d - z.d <= 30 * (1 + extra)).sort((a, b) => b.d - a.d).slice(0, extra)
+      .forEach(z => applyEff(z, Math.round(dmg * .5), Object.assign({}, eff, { pierce: 1 })));
+    beep(700, .04, 'triangle', .03);
+    return;
+  }
+  if (k === 'hammer') {
+    const reach = 76 + 2 * l, t = pickTarget(s, reach);
+    const obs = obstaclesNear(s.x, s.y, reach);
+    if (!t && !obs.length) { c.mcd[k] = .1; return; }
+    c.mcd[k] = (2.4 - .1 * l) * hs; c.throwT = 1; c.bounce = 1;
+    obs.forEach(j => hitObstacle(j, 2));
+    const p = t ? zPos(t) : SLOTS[obs[0]], aoe = 30 + 2 * l, daze = (.3 + .04 * l) * (c.key === 'hammer+hammer' ? 2 : 1);
+    if (t) for (const z of S.zombies.slice()) {
+      if (z.dead) continue;
+      const q = zPos(z);
+      if (z !== t && Math.hypot(q.x - p.x, q.y - p.y) > aoe) continue;
+      applyEff(z, dmg, eff);
+      if (z.dead) continue;
+      if (z.isBoss) { if (z.state === 'charge') { z.state = 'walk'; z.chargeMul = 1; text(q.x, q.y - 60, 'Chặn!', '#fff', 16); } }
+      else { z.d = Math.max(z.d - (16 + 2 * l) * (HEAVY[z.kind] ? .5 : 1), Math.min(z.d, 0)); z.frzT = Math.max(z.frzT, daze); }
+    }
+    S.fx.push({ kind: 'ring', x: p.x, y: p.y, r0: 6, r1: aoe, col: '#ffe6a0', life: .3, max: .3 });
+    burst(p.x, p.y, 8, ['#c9c2a0', '#a39b74']); S.shake = Math.max(S.shake, 2); beep(70, .2, 'square', .07);
+    return;
+  }
+  if (k === 'shield') {
+    const reach = 78 + 2 * l;
+    c.mcd[k] = 1 * hs;
+    const slow = { m: Math.max(.45, .7 - .03 * l), t: 1.1 };
+    let any = false;
+    for (const z of S.zombies.slice()) {
+      if (z.dead || z.phased) continue;
+      const q = zPos(z);
+      if (Math.hypot(q.x - s.x, q.y - s.y) > reach) continue;
+      applyEff(z, dmg, Object.assign({}, eff, { slow })); any = true;
+    }
+    obstaclesNear(s.x, s.y, reach).forEach(j => { hitObstacle(j, 1); any = true; });
+    if (any) { c.throwT = 1; S.fx.push({ kind: 'ring', x: s.x, y: s.y, r0: 20, r1: reach, col: 'rgba(181,101,29,.6)', life: .3, max: .3 }); }
+  }
+}
+function meleeReach(c) {
+  const l = c.legend ? MAXL + 1 : c.lvl;
+  const r = { sword: () => { const g = swordGeom(l); return g.R + g.BL / 2; }, spear: () => 80 + 3 * l, hammer: () => 76 + 2 * l, shield: () => 78 + 2 * l };
+  return Math.max(0, ...(c.legend ? c.kinds : [c.kind]).filter(k => r[k]).map(k => r[k]()));
+}
+function thrust(s, p) { S.fx.push({ kind: 'thrust', x0: s.x, y0: s.y - 6, x1: p.x, y1: p.y, life: .18, max: .18 }); }
+function drawBlade(BL) {
+  poly([[0, -3], [BL - 6, -3.5], [BL, 0], [BL - 6, 3.5], [0, 3]], '#dfe6ee', '#6a737b', 1.2);
+  ctx.globalAlpha *= .6; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(BL - 7, 0); ctx.stroke(); ctx.globalAlpha /= .6;
+  rrect(-2, -6, 4, 12, 1.5, '#ffd23f', '#8a6400', 1);
+  rrect(-8, -1.5, 6, 3, 1, '#7a4a22');
+}
+function drawMelee() {
+  S.grid.forEach((c, i) => {
+    if (i >= NA || !isCrit(c) || !has(c, 'sword') || c.fuseT > 0 || (drag && drag.from === i)) return;
+    const s = SLOTS[i], l = c.legend ? 7 : c.lvl;
+    for (const r of swordRings(c, l)) {
+      const th0 = r.dir * (c.spin || 0);
+      ctx.save(); ctx.translate(s.x, s.y);
+      if (c.stun > 0) ctx.globalAlpha = .5;
+      ctx.strokeStyle = 'rgba(223,230,238,.3)'; ctx.lineWidth = r.g.BL * .6; ctx.lineCap = 'butt';
+      for (let b = 0; b < r.N; b++) {
+        const th = th0 + b * Math.PI * 2 / r.N;
+        ctx.beginPath(); ctx.arc(0, 0, r.R, r.dir > 0 ? th - .6 : th, r.dir > 0 ? th : th + .6); ctx.stroke();
+        ctx.save(); ctx.rotate(th); ctx.translate(r.R - r.g.BL / 2, 0);
+        // blades trail behind the spin direction, edge facing forward
+        if (r.dir < 0) ctx.scale(1, -1);
+        ctx.rotate(Math.PI / 2 * 0); drawBlade(r.g.BL);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+  });
 }
 
 // ---------- critters ----------
@@ -700,6 +854,7 @@ function updateCritters(dt) {
       }
       return;
     }
+    if (TYPES[k].melee) return meleeTick(c, s, k, c.lvl, tDmg(k, c.lvl, c.buff), dt, {});
     if (k === 'drum') {
       if ((c.beat -= dt) <= 0) {
         c.beat = 1; c.throwT = 1;
@@ -735,6 +890,11 @@ function legendTick(c, s, dt) {
   if (has(c, 'drum') && (c.beat -= dt) <= 0) {
     c.beat = 1; if (!st.atk.length) c.throwT = 1;
     S.fx.push({ kind: 'ring', x: s.x, y: s.y, r0: 20, r1: drumAura(c).rad, col: 'rgba(255,210,63,.55)', life: .45, max: .45 });
+  }
+  for (const mk of new Set(c.kinds.filter(k => TYPES[k].melee))) {
+    const md = Math.round(critDmg(MAXL) * TYPES[mk].dmg * 1.4 * st.P * (1 + c.buff));
+    const me = legendEff(c, md); delete me.r;
+    meleeTick(c, s, mk, MAXL + 1, md, dt, me);
   }
   if (!st.atk.length || (c.cd -= dt) > 0) return;
   const pref = has(c, 'ice') ? 'ice' : has(c, 'durian') ? 'durian' : null;
@@ -947,6 +1107,15 @@ function drawCritter(x, y, c, s = 1, held = false) {
   if (has(c, 'ice')) { ctx.beginPath(); ctx.arc(0, -10, 10, Math.PI, 0); ctx.closePath(); ctx.fillStyle = '#f4fbff'; ctx.fill(); ctx.strokeStyle = '#9cc8e8'; ctx.lineWidth = 1.5; ctx.stroke(); circle(0, -21, 3, '#fff', '#9cc8e8', 1); }
   if (has(c, 'chili')) { ell(2, -15, 9, 3.5, '#e8261c', '#7a120c', 1.2, -.3); ctx.strokeStyle = '#3c9a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-7, -12); ctx.lineTo(-10, -16); ctx.stroke(); }
   if (has(c, 'bolt')) { ctx.strokeStyle = '#3b4a1c'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(3, -24); ctx.stroke(); circle(3, -25, 3.2, '#ffd23f', '#a07a00', 1); }
+  if (has(c, 'sword')) {
+    rrect(-14, -12, 28, 4, 2, '#e2323a', '#7a1218', 1);
+    ctx.strokeStyle = '#e2323a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-14, -10); ctx.quadraticCurveTo(-22, -8 + Math.sin(S.time * 8) * 2, -26, -4); ctx.moveTo(-14, -9); ctx.quadraticCurveTo(-20, -4, -23, 1); ctx.stroke();
+  }
+  if (has(c, 'spear')) poly([[-17, -11], [17, -11], [0, -30]], '#e9d27a', '#a08a3a', 1.2);
+  if (has(c, 'hammer')) {
+    ctx.beginPath(); ctx.arc(0, -9, 12, Math.PI, 0); ctx.closePath(); ctx.fillStyle = '#8a96a3'; ctx.fill(); ctx.strokeStyle = '#4a5560'; ctx.lineWidth = 1.5; ctx.stroke();
+    [-1, 1].forEach(d => poly([[d * 10, -14], [d * 20, -24], [d * 13, -10]], '#fff8e8', '#8a7a60', 1));
+  }
   if (has(c, 'drum')) { ell(0, 8, 9, 5.5, '#d9483b', '#6b1a12', 1.5); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-6, 7); ctx.lineTo(6, 10); ctx.moveTo(-6, 10); ctx.lineTo(6, 7); ctx.stroke(); }
   [-6, 6].forEach(ex => { circle(ex, -2, 5.5, '#fff', '#3b4a1c', 1.5); circle(ex + 1, -1.5, 2.6, '#2a2a2a'); circle(ex + 1.8, -2.6, .9, '#fff'); });
   if (has(c, 'piggy')) { ell(0, 5, 5, 3.5, '#ffb3cf', '#a0506a', 1); circle(-1.6, 5, .9, '#5a2a3a'); circle(1.6, 5, .9, '#5a2a3a'); rrect(-4, -13, 8, 2.5, 1, '#7a2a3a'); }
@@ -954,7 +1123,10 @@ function drawCritter(x, y, c, s = 1, held = false) {
   ctx.save(); ctx.translate(16, 5); ctx.rotate(-1.2 + c.throwT * 1.8);
   ell(0, -5, 3.5, 6, col, '#3b4a1c', 1.5);
   if (has(c, 'durian')) drawSpiky(0, -12, 4.5);
+  if (has(c, 'spear')) { ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(0, -24); ctx.stroke(); poly([[0, -31], [3, -23], [-3, -23]], '#dfe6ee', '#3c9a2a', 1); }
+  if (has(c, 'hammer')) { ctx.strokeStyle = '#7a4a22'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(0, 2); ctx.lineTo(0, -18); ctx.stroke(); rrect(-7, -25, 14, 9, 2, '#8a96a3', '#4a5560', 1.2); }
   ctx.restore();
+  if (has(c, 'shield')) { circle(-15, 6, 7.5, '#a0622a', '#5a3410', 1.5); circle(-15, 6, 2.5, '#d9d0c0'); [0, 1, 2, 3].forEach(n => { const a = n * Math.PI / 2 + .78; circle(-15 + Math.cos(a) * 5, 6 + Math.sin(a) * 5, 1, '#dfe6ee'); }); }
   if (L) {
     const hy = -38 + Math.sin(S.time * 3) * 1.5;
     ell(0, hy, 12, 3.5, null, 'rgba(255,240,150,.9)', 2.5);
@@ -1252,6 +1424,13 @@ function drawFx() {
     ctx.globalAlpha = Math.max(0, f.life / f.max);
     if (f.kind === 'ring') circle(f.x, f.y, f.r0 + (f.r1 - f.r0) * t, null, f.col, 3);
     if (f.kind === 'fly') circle(f.x0 + (f.x1 - f.x0) * t, f.y0 + (f.y1 - f.y0) * t - Math.sin(t * Math.PI) * 20, 9 - t * 4, f.col, '#fff', 2);
+    if (f.kind === 'slash') { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(f.x, f.y, 10 + t * 6, f.a - .9, f.a + .9); ctx.stroke(); }
+    if (f.kind === 'thrust') {
+      const e = Math.sin(t * Math.PI), x = f.x0 + (f.x1 - f.x0) * e, y = f.y0 + (f.y1 - f.y0) * e;
+      ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(f.x0, f.y0); ctx.lineTo(x, y); ctx.stroke();
+      const a = Math.atan2(f.y1 - f.y0, f.x1 - f.x0);
+      poly([[x + Math.cos(a) * 9, y + Math.sin(a) * 9], [x + Math.cos(a + 2.4) * 5, y + Math.sin(a + 2.4) * 5], [x + Math.cos(a - 2.4) * 5, y + Math.sin(a - 2.4) * 5]], '#dfe6ee', '#3c9a2a', 1);
+    }
     if (f.kind === 'flash') circle(f.x, f.y, 45 * (.6 + t * .6), 'rgba(255,255,255,.85)');
     if (f.kind === 'bolt') {
       [[6, f.cols ? f.cols[0] : 'rgba(255,210,63,.5)'], [2.5, f.cols ? f.cols[1] : '#fff6a0']].forEach(([lw, col]) => {
@@ -1306,6 +1485,7 @@ function render() {
   S.grid.forEach((c, i) => { if (c && !(drag && drag.from === i)) ents.push({ y: SLOTS[i].y, f: () => isCrit(c) ? drawCritter(SLOTS[i].x, SLOTS[i].y, c) : drawBarrel(SLOTS[i], c) }); });
   for (const z of S.zombies) { const p = zPos(z); ents.push({ y: p.y, f: () => drawZombie(z) }); }
   ents.sort((a, b) => a.y - b.y).forEach(e => e.f());
+  drawMelee();
   drawWarns();
   for (const s of S.shots) drawShot(s);
   drawFx();
@@ -1315,7 +1495,11 @@ function render() {
   ctx.globalAlpha = 1;
   if (drag) {
     const c = S.grid[drag.from];
-    if (c) drawCritter(drag.x, drag.y - 10, c, 1.15, true);
+    if (c) {
+      const r = meleeReach(c);
+      if (r) circle(drag.x, drag.y, r, 'rgba(225,232,240,.12)', 'rgba(225,232,240,.6)', 2);
+      drawCritter(drag.x, drag.y - 10, c, 1.15, true);
+    }
     if (fuseHover) label(fuseHover.t, fuseHover.s.x, fuseHover.s.y - 58, 14, '#ffd23f', '#5a3000');
   }
   drawBossBar();
@@ -1336,17 +1520,7 @@ cv.addEventListener('pointerdown', e => {
   const p = toWorld(e), i = slotAt(p.x, p.y);
   if (i < 0 || !S.grid[i]) return;
   const c = S.grid[i];
-  if (!isCrit(c)) {
-    c.hp--; c.shake = 1; beep(150, .06, 'square', .05);
-    burst(SLOTS[i].x, SLOTS[i].y - 10, 4, ['#d98a2b', '#8a4e16']);
-    if (c.hp <= 0) {
-      S.grid[i] = null;
-      if (c.gold) { S.coins += c.gold; text(SLOTS[i].x, SLOTS[i].y - 24, '+' + fmt(c.gold), '#ffd23f'); }
-      burst(SLOTS[i].x, SLOTS[i].y - 6, 18, ['#d98a2b', '#8a4e16', '#ffd23f']);
-      beep(500, .2, 'triangle', .06, 500); hud();
-    }
-    return;
-  }
+  if (!isCrit(c)) { hitObstacle(i, 1); return; }
   drag = { from: i, x: p.x, y: p.y, sx: p.x, sy: p.y };
   cv.setPointerCapture(e.pointerId);
 });
@@ -1363,10 +1537,10 @@ function endDrag(e) {
       if (c.legend) {
         const st = legendStats(c);
         text(s.x, s.y - 52, `${legendName(c.key)} ${'★'.repeat(c.star)}`, '#ffd23f', 13);
-        text(s.x, s.y - 36, (st.atk.length ? `ST ${fmt(st.dmg)}` : 'Hỗ trợ') + (LEG_INFO[c.key] ? ' · ' + LEG_INFO[c.key] : ''), '#fff', 11);
+        text(s.x, s.y - 36, (st.atk.length ? `ST ${fmt(st.dmg)}` : c.kinds.some(k => TYPES[k].melee) ? 'Cận chiến' : 'Hỗ trợ') + (LEG_INFO[c.key] ? ' · ' + LEG_INFO[c.key] : ''), '#fff', 11);
         return;
       }
-      const info = k === 'piggy' ? `+${Math.round(2 * Math.pow(1.8, c.lvl - 1))}🪙/8s` : k === 'drum' ? `+${Math.round(Math.min(.6, .15 + .03 * c.lvl) * 100)}% ST` : `ST ${fmt(tDmg(k, c.lvl, c.buff))}`;
+      const info = k === 'piggy' ? `+${Math.round(2 * Math.pow(1.8, c.lvl - 1))}🪙/8s` : k === 'drum' ? `+${Math.round(Math.min(.6, .15 + .03 * c.lvl) * 100)}% ST` : `ST ${fmt(tDmg(k, c.lvl, c.buff))}` + (k === 'sword' ? ` · ${swordGeom(c.lvl).N} kiếm` : '');
       text(s.x, s.y - 44, `${TYPES[k].vi} · ${info}`, '#fff', 13);
     }
     return;
@@ -1437,11 +1611,15 @@ function relayout(li, benchN) {
   const oldA = S.grid.slice(0, NA).map((c, i) => c && { c, d: Math.hypot(SLOTS[i].x - CX, SLOTS[i].y - CY) }).filter(Boolean);
   const oldB = S.grid.slice(NA).filter(Boolean);
   oldA.sort((a, b) => a.d - b.d);
+  const isMel = c => isCrit(c) && (c.legend ? c.kinds : [c.kind]).some(k => TYPES[k].melee);
   applyLayout(li, benchN);
   S.layout = li; S.benchN = benchN;
   S.grid = Array(SLOTS.length).fill(null);
   const order = SLOTS.slice(0, NA).map((s, i) => i).sort((i, j) => Math.hypot(SLOTS[i].x - CX, SLOTS[i].y - CY) - Math.hypot(SLOTS[j].x - CX, SLOTS[j].y - CY));
-  oldA.forEach((o, n) => { S.grid[order[n]] = o.c; o.c.pop = .6; });
+  // melee critters keep hugging the track: they take the outermost slots, everything else fills from the centre
+  const mel = oldA.filter(o => isMel(o.c)), rest = oldA.filter(o => !isMel(o.c));
+  mel.forEach((o, n) => { S.grid[order[order.length - 1 - n]] = o.c; o.c.pop = .6; });
+  rest.forEach((o, n) => { S.grid[order[n]] = o.c; o.c.pop = .6; });
   oldB.forEach((c, n) => { S.grid[NA + n] = c; });
   S.warns = []; drag = null;
 }
@@ -1477,9 +1655,10 @@ function autoMerge() {
     }
   }
   if (!best) return false;
-  // keep the one nearer the centre, it has the better reach
+  // ranged keeps the one nearer the centre (better reach)
   const di = Math.hypot(SLOTS[best.i].x - CX, SLOTS[best.i].y - CY), dj = Math.hypot(SLOTS[best.j].x - CX, SLOTS[best.j].y - CY);
-  const [from, to] = di < dj ? [best.j, best.i] : [best.i, best.j];
+  const outer = TYPES[S.grid[best.i].kind].melee;   // melee keeps the slot nearer the track
+  const [from, to] = (di < dj) !== outer ? [best.j, best.i] : [best.i, best.j];
   doMerge(from, to);
   return true;
 }
