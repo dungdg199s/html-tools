@@ -48,8 +48,13 @@ footer{display:flex; gap:10px; padding:8px 16px 14px; align-items:stretch}
 #over p{margin:4px 0; font-weight:800}
 #over button{margin-top:14px; border:0; border-radius:14px; padding:12px 24px; font:inherit; font-weight:900;
   font-size:18px; color:#fff; background:linear-gradient(#7fd44c,#4aa52a); box-shadow:0 4px 0 #2f7a18; cursor:pointer}
-#help{position:absolute; left:16px; right:16px; bottom:8px; text-align:center; font-weight:800; font-size:13px;
-  color:#6b3d12; pointer-events:none}
+#tools{display:flex; gap:8px; padding:0 16px}
+#tools button{flex:1; border:0; border-radius:12px; padding:7px 4px; font:inherit; font-weight:900; font-size:13px; color:#fff;
+  background:#8a5a2b; box-shadow:0 3px 0 #5a3410; cursor:pointer; line-height:1.15}
+#tools button small{display:block; font-size:11px; font-weight:800; opacity:.9}
+#tools button.on{background:#4aa52a; box-shadow:0 3px 0 #2f7a18}
+#tools button:disabled{filter:grayscale(.6) brightness(.9); cursor:not-allowed}
+#tools button:active{transform:translateY(2px); box-shadow:0 1px 0 #5a3410}
 </style>
 </head>
 <body>
@@ -62,13 +67,17 @@ footer{display:flex; gap:10px; padding:8px 16px 14px; align-items:stretch}
   <div id="wrap">
     <canvas id="cv"></canvas>
     <div id="banner"></div>
-    <div id="help">Kéo 2 critter <b>cùng loại, cùng cấp</b> chồng lên nhau để hợp nhất · Chạm critter để xem tên · Chạm thùng/hũ để đập</div>
     <div id="over"><div class="card">
       <h2>Thua rồi! 🧟</h2>
       <p>Trụ được tới wave <span id="ow">1</span></p>
       <p>Kỷ lục: wave <span id="ob">1</span></p>
       <button id="again">Chơi lại</button>
     </div></div>
+  </div>
+  <div id="tools">
+    <button id="auto">🔀 Auto gộp<small id="autotxt">TẮT</small></button>
+    <button id="bench">🪑 Ô chờ<small>🪙 <span id="benchcost">100</span></small></button>
+    <button id="space">🗺️ Mở rộng<small>🪙 <span id="spacecost">1.5K</span></small></button>
   </div>
   <footer>
     <button id="summon">Triệu hồi<small>🪙 <span id="cost">10</span></small></button>
@@ -85,16 +94,36 @@ footer{display:flex; gap:10px; padding:8px 16px 14px; align-items:stretch}
 <script>
 (() => {
 // ---------- world layout ----------
-const W = 400, H = 430, CX = 200, CY = 218;
-const TR = 166, TW = 44, GR = 140;            // track radius / width, grass radius
-const A0 = -Math.PI / 2 - 0.05;               // zombies enter here (top, left of gate)
-const LAP = TR * (2 * Math.PI - 0.42);        // distance until they reach the gate
-const GATE_A = A0 - LAP / TR;
-const SLOT_R = 23, MAXL = 15;
-const SLOTS = [];
-[3, 4, 5, 4, 3].forEach((n, r) => {
-  for (let i = 0; i < n; i++) SLOTS.push({ x: CX + (i - (n - 1) / 2) * 54, y: CY + (r - 2) * 48 });
-});
+const TW = 44, A0 = -Math.PI / 2 - 0.05;      // track width; zombies enter here (top, left of gate)
+const SLOT_R = 23, MAXL = 15, MAX_BENCH = 6;
+// arena layouts, bought with the "Mở rộng" button: bigger field, more slots, longer track
+const LAYOUTS = [
+  { tr: 166, rows: [3, 4, 5, 4, 3], dy: 48, cost: 1500 },
+  { tr: 200, rows: [3, 4, 5, 6, 5, 4, 3], dy: 46, cost: 15000 },
+  { tr: 236, rows: [3, 4, 5, 6, 7, 6, 5, 4, 3], dy: 44 },
+];
+let W, H, CX, CY, TR, GR, LAP, GATE_A, K = 1, NA = 0, SLOTS = [];
+let grassDots = [];
+function applyLayout(li, benchN) {
+  const L = LAYOUTS[li], half = L.tr + TW / 2 + 12;
+  TR = L.tr; GR = TR - 26; K = TR / 166;
+  W = half * 2; CX = W / 2; CY = half + 18; H = CY + TR + TW / 2 + 70;
+  LAP = TR * (2 * Math.PI - 0.42);              // distance until they reach the gate
+  GATE_A = A0 - LAP / TR;
+  SLOTS = [];
+  L.rows.forEach((n, r) => {
+    for (let i = 0; i < n; i++) SLOTS.push({ x: CX + (i - (n - 1) / 2) * 54, y: CY + (r - (L.rows.length - 1) / 2) * L.dy });
+  });
+  NA = SLOTS.length;
+  const by = CY + TR + TW / 2 + 36;
+  for (let i = 0; i < benchN; i++) SLOTS.push({ x: CX + (i - (benchN - 1) / 2) * 54, y: by, bench: true });
+  grassDots = [];
+  for (let i = 0; i < 40 * K * K; i++) {
+    const a = rnd(0, 7), d = rnd(0, GR - 10);
+    grassDots.push({ x: CX + Math.cos(a) * d, y: CY + Math.sin(a) * d });
+  }
+  resize();
+}
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
@@ -119,16 +148,12 @@ function wpick(keys, wf) {
   for (let i = 0; i < keys.length; i++) if ((r -= ws[i]) <= 0) return keys[i];
   return keys[keys.length - 1];
 }
+// tufts and decor are in base-layout coordinates (arena centre 200,218) and scaled with the arena
 const tufts = [];
 for (let i = 0; i < 160; i++) {
   const x = rnd(-250, 650), y = rnd(-350, 780);
-  if (Math.hypot(x - CX, y - CY) < TR + TW / 2 + 8) continue;
+  if (Math.hypot(x - 200, y - 218) < 196) continue;
   tufts.push({ x, y, s: rnd(.7, 1.2) });
-}
-const grassDots = [];
-for (let i = 0; i < 40; i++) {
-  const a = rnd(0, 7), d = rnd(0, GR - 10);
-  grassDots.push({ x: CX + Math.cos(a) * d, y: CY + Math.sin(a) * d });
 }
 
 // ---------- sound ----------
@@ -161,7 +186,7 @@ const critRate = l => Math.max(.4, .85 - .03 * l);
 const critRange = l => 175 + l * 6;
 const tDmg = (k, l, buff = 0) => Math.max(1, Math.round(critDmg(l) * TYPES[k].dmg * (1 + buff)));
 const tRate = (k, l) => critRate(l) * TYPES[k].rate;
-const tRange = (k, l) => critRange(l) + TYPES[k].range;
+const tRange = (k, l) => (critRange(l) + TYPES[k].range) * K;
 const critter = (lvl, kind = 'leek') => ({ type: 'c', kind, lvl, cd: rnd(0, .5), bounce: 0, throwT: 0, pop: 1, buff: 0, gen: 8, beat: 1, stun: 0, stunKind: 'daze' });
 function rollKind() {
   const w = Math.max(1, S.wave);
@@ -206,14 +231,18 @@ try { best = +localStorage.getItem('cd-best') || 0; } catch (e) {}
 
 function newGame() {
   S = {
-    wave: 0, coins: 30, gate: 20, gateMax: 20, summons: 0, grid: Array(SLOTS.length).fill(null),
+    wave: 0, coins: 30, gate: 20, gateMax: 20, summons: 0, grid: [],
     zombies: [], shots: [], parts: [], texts: [], fx: [], warns: [], queue: [], spawnT: 0, breakT: 2, over: false,
-    paused: false, speed: S ? S.speed : 1, shake: 0, time: 0, hitBeep: 0
+    paused: false, speed: S ? S.speed : 1, shake: 0, time: 0, hitBeep: 0,
+    layout: 0, benchN: 0, auto: S ? S.auto : false, autoT: 0
   };
+  applyLayout(0, 0);
+  S.grid = Array(SLOTS.length).fill(null);
   S.grid[7] = critter(1); S.grid[11] = critter(1);
   $('over').style.display = 'none';
   $('pause').textContent = '⏸';
   hud();
+  banner('Kéo 2 lính cùng loại, cùng cấp để gộp', 3);
 }
 const summonCost = () => 10 + S.summons * 3;
 const waveActive = () => S.queue.length > 0 || S.zombies.length > 0;
@@ -314,7 +343,8 @@ function slotAt(x, y) {
   for (let i = 0; i < SLOTS.length; i++) if (Math.hypot(SLOTS[i].x - x, SLOTS[i].y - y) < SLOT_R + 6) return i;
   return -1;
 }
-const emptySlots = () => S.grid.map((c, i) => c ? -1 : i).filter(i => i >= 0);
+const emptySlots = (bench = false) => S.grid.map((c, i) => c || (i >= NA && !bench) ? -1 : i).filter(i => i >= 0);
+const arenaCrits = () => S.grid.map((c, i) => i < NA && isCrit(c) ? i : -1).filter(i => i >= 0);
 const isCrit = c => c && c.type === 'c';
 function effSpd(z) {
   let s = z.spd;
@@ -374,6 +404,7 @@ function update(dt) {
 
   updateWarns(dt);
   updateCritters(dt);
+  if (S.auto && (S.autoT -= dt) <= 0) S.autoT = autoMerge() ? .35 : .5;
 
   // shots
   for (const s of S.shots) {
@@ -475,7 +506,7 @@ function warnSlot(z, slot, a, kind, col) {
   S.warns.push({ slot, t: a.warn, max: a.warn, kind, col, boss: z, dur: a.dur });
 }
 function startAbility(z, a) {
-  const crits = S.grid.map((c, i) => isCrit(c) ? i : -1).filter(i => i >= 0);
+  const crits = arenaCrits();
   z.cast = a;
   switch (a.k) {
     case 'summon': case 'jump': case 'heal': case 'charge':
@@ -565,8 +596,9 @@ function updateCritters(dt) {
   S.grid.forEach((c, i) => {
     if (!isCrit(c)) return;
     c.buff = 0;
+    if (i >= NA) return;
     S.grid.forEach((d, j) => {
-      if (j === i || !isCrit(d) || d.kind !== 'drum' || d.stun > 0) return;
+      if (j === i || j >= NA || !isCrit(d) || d.kind !== 'drum' || d.stun > 0) return;
       if (Math.hypot(SLOTS[i].x - SLOTS[j].x, SLOTS[i].y - SLOTS[j].y) <= 60) c.buff = Math.max(c.buff, Math.min(.6, .15 + .03 * d.lvl));
     });
   });
@@ -576,7 +608,7 @@ function updateCritters(dt) {
     if (c.type !== 'c') { c.shake = Math.max(0, c.shake - dt * 8); return; }
     c.bounce = Math.max(0, c.bounce - dt * 5); c.throwT = Math.max(0, c.throwT - dt * 4);
     if (c.stun > 0) { c.stun -= dt; return; }
-    if (drag && drag.from === i) return;
+    if (i >= NA || (drag && drag.from === i)) return;   // bench critters just wait
     const s = SLOTS[i], k = c.kind;
     if (k === 'piggy') {
       if (waveActive() && (c.gen -= dt) <= 0) {
@@ -696,7 +728,7 @@ function bossReward(z) {
   const hi = S.grid.reduce((m, c) => isCrit(c) ? Math.max(m, c.lvl) : m, 1);
   const gifts = [{ lvl: Math.max(2, hi - 2), kind: rollKind() }, ...z.sack.map(s => ({ lvl: Math.min(MAXL, s.lvl + 1), kind: s.kind }))];
   for (const g of gifts) {
-    const e = emptySlots();
+    const e = emptySlots().length ? emptySlots() : emptySlots(true);
     if (e.length) { const i = pick(e); S.grid[i] = critter(g.lvl, g.kind); burst(SLOTS[i].x, SLOTS[i].y, 12, ['#ffe66b', '#fff']); }
     else S.coins += 10 * Math.pow(2, g.lvl);
   }
@@ -950,7 +982,7 @@ function drawBoss(z) {
 function drawBossBar() {
   const z = S.zombies.find(q => q.isBoss && !q.dead);
   if (!z) return;
-  const x = 80, w = 240, y = Math.max(-oy / scale + 6, -60);
+  const x = CX - 120, w = 240, y = Math.max(-oy / scale + 6, -60);
   rrect(x, y, w, 14, 7, '#3a1a1e', '#1a0a0c', 2);
   const g = ctx.createLinearGradient(x, 0, x + w, 0);
   if (z.immune) { g.addColorStop(0, '#9cdcff'); g.addColorStop(1, '#5aa8e0'); } else { g.addColorStop(0, '#ff5a5a'); g.addColorStop(1, '#c21f3a'); }
@@ -997,8 +1029,14 @@ function drawWorld() {
   for (let i = -TW / 2; i < TW / 2; i += 9) { ctx.fillRect(-4, i, 12, 3.5); ctx.fillRect(10, i + 4, 12, 3.5); }
   ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(10, -TW / 2 - 2, 12, (TW + 4) * (1 - ratio));
   ctx.restore();
+  if (NA < SLOTS.length) {
+    const b0 = SLOTS[NA], b1 = SLOTS[SLOTS.length - 1];
+    rrect(b0.x - 30, b0.y - 28, b1.x - b0.x + 60, 56, 16, '#b07a3e', '#6b3d12', 3);
+    ctx.fillStyle = 'rgba(107,61,18,.25)'; ctx.fillRect(b0.x - 26, b0.y + 4, b1.x - b0.x + 52, 3);
+    label('Ô CHỜ', CX, b0.y - 36, 12, '#fff6e3', '#6b3d12');
+  }
   SLOTS.forEach((s, i) => {
-    let col = 'rgba(70,110,30,.28)';
+    let col = s.bench ? 'rgba(80,40,10,.3)' : 'rgba(70,110,30,.28)';
     if (drag && i !== drag.from) {
       const c = S.grid[i], hc = S.grid[drag.from];
       if (isCrit(c) && hc && c.lvl === hc.lvl && c.kind === hc.kind && c.lvl < MAXL) col = 'rgba(255,240,90,.75)';
@@ -1024,6 +1062,7 @@ function drawFx() {
     const t = 1 - f.life / f.max;
     ctx.globalAlpha = Math.max(0, f.life / f.max);
     if (f.kind === 'ring') circle(f.x, f.y, f.r0 + (f.r1 - f.r0) * t, null, f.col, 3);
+    if (f.kind === 'fly') circle(f.x0 + (f.x1 - f.x0) * t, f.y0 + (f.y1 - f.y0) * t - Math.sin(t * Math.PI) * 20, 9 - t * 4, f.col, '#fff', 2);
     if (f.kind === 'bolt') {
       [[6, 'rgba(255,210,63,.5)'], [2.5, '#fff6a0']].forEach(([lw, col]) => {
         ctx.beginPath(); ctx.strokeStyle = col; ctx.lineWidth = lw;
@@ -1062,6 +1101,7 @@ function render() {
   ctx.fillStyle = '#e7b866'; ctx.fillRect(0, 0, cw, ch);
   const sh = S.shake ? rnd(-S.shake, S.shake) : 0;
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + sh), dpr * oy);
+  ctx.save(); ctx.translate(CX, CY); ctx.scale(K, K); ctx.translate(-200, -218);
   ctx.strokeStyle = 'rgba(160,100,40,.45)'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
   for (const t of tufts) {
     ctx.beginPath();
@@ -1070,6 +1110,7 @@ function render() {
     ctx.moveTo(t.x + 4 * t.s, t.y); ctx.lineTo(t.x + 5 * t.s, t.y - 5 * t.s); ctx.stroke();
   }
   drawDecor();
+  ctx.restore();
   drawWorld();
   const ents = [];
   S.grid.forEach((c, i) => { if (c && !(drag && drag.from === i)) ents.push({ y: SLOTS[i].y, f: () => isCrit(c) ? drawCritter(SLOTS[i].x, SLOTS[i].y, c) : drawBarrel(SLOTS[i], c) }); });
@@ -1137,14 +1178,19 @@ function endDrag(e) {
   const t = S.grid[j];
   if (!t) { S.grid[j] = c; S.grid[from] = null; c.pop = .4; }
   else if (isCrit(t) && t.lvl === c.lvl && t.kind === c.kind && t.lvl < MAXL) {
-    t.lvl++; t.pop = 1; t.stun = 0; S.grid[from] = null;
-    burst(SLOTS[j].x, SLOTS[j].y - 8, 16, ['#ffe66b', '#ffffff', LVL_COLORS[(t.lvl - 1) % LVL_COLORS.length]]);
-    text(SLOTS[j].x, SLOTS[j].y - 40, 'LV ' + t.lvl + '!', '#5be03a');
-    beep(440, .08, 'triangle', .06); setTimeout(() => beep(660, .08, 'triangle', .06), 70); setTimeout(() => beep(880, .12, 'triangle', .06), 140);
+    doMerge(from, j);
   } else if (isCrit(t)) {
     if (t.lvl === c.lvl && t.kind !== c.kind) text(SLOTS[j].x, SLOTS[j].y - 40, 'Khác loại!', '#ffb3b3', 13);
     S.grid[j] = c; S.grid[from] = t; c.pop = t.pop = .4;
   }
+}
+function doMerge(from, j) {
+  const t = S.grid[j];
+  t.lvl++; t.pop = 1; t.stun = 0; S.grid[from] = null;
+  S.fx.push({ kind: 'fly', x0: SLOTS[from].x, y0: SLOTS[from].y, x1: SLOTS[j].x, y1: SLOTS[j].y, col: TYPES[t.kind].accent, life: .25, max: .25 });
+  burst(SLOTS[j].x, SLOTS[j].y - 8, 16, ['#ffe66b', '#ffffff', LVL_COLORS[(t.lvl - 1) % LVL_COLORS.length]]);
+  text(SLOTS[j].x, SLOTS[j].y - 40, 'LV ' + t.lvl + '!', '#5be03a');
+  beep(440, .08, 'triangle', .06); setTimeout(() => beep(660, .08, 'triangle', .06), 70); setTimeout(() => beep(880, .12, 'triangle', .06), 140);
 }
 cv.addEventListener('pointerup', endDrag);
 cv.addEventListener('pointercancel', () => drag = null);
@@ -1156,10 +1202,14 @@ function hud() {
   $('cost').textContent = fmt(summonCost());
   $('gatebar').style.width = (S.gate / S.gateMax * 100) + '%';
   $('gatetxt').textContent = S.gate + '/' + S.gateMax;
-  $('summon').disabled = S.coins < summonCost() || !S.grid.some(c => !c) || S.over;
+  $('summon').disabled = S.coins < summonCost() || !emptySlots(true).length || S.over;
+  $('autotxt').textContent = S.auto ? 'BẬT' : 'TẮT'; $('auto').classList.toggle('on', S.auto);
+  const bc = benchCost(), sc = spaceCost();
+  $('benchcost').textContent = bc ? fmt(bc) : 'Tối đa'; $('bench').disabled = !bc || S.coins < bc || S.over;
+  $('spacecost').textContent = sc ? fmt(sc) : 'Tối đa'; $('space').disabled = !sc || S.coins < sc || S.over;
 }
 $('summon').onclick = () => {
-  const cost = summonCost(), empty = emptySlots();
+  const cost = summonCost(), empty = emptySlots().length ? emptySlots() : emptySlots(true);
   if (S.coins < cost || !empty.length || S.over) return;
   S.coins -= cost; S.summons++;
   const i = pick(empty), lvl = Math.random() < .1 ? 2 : 1, kind = rollKind();
@@ -1169,6 +1219,59 @@ $('summon').onclick = () => {
   beep(700, .1, 'triangle', .05, 300);
   hud();
 };
+const benchCost = () => S.benchN >= MAX_BENCH ? 0 : Math.round(100 * Math.pow(2.5, S.benchN));
+const spaceCost = () => LAYOUTS[S.layout].cost || 0;
+// rebuild SLOTS for a new layout / bench size, keeping every critter and barrel
+function relayout(li, benchN) {
+  const oldA = S.grid.slice(0, NA).map((c, i) => c && { c, d: Math.hypot(SLOTS[i].x - CX, SLOTS[i].y - CY) }).filter(Boolean);
+  const oldB = S.grid.slice(NA).filter(Boolean);
+  oldA.sort((a, b) => a.d - b.d);
+  applyLayout(li, benchN);
+  S.layout = li; S.benchN = benchN;
+  S.grid = Array(SLOTS.length).fill(null);
+  const order = SLOTS.slice(0, NA).map((s, i) => i).sort((i, j) => Math.hypot(SLOTS[i].x - CX, SLOTS[i].y - CY) - Math.hypot(SLOTS[j].x - CX, SLOTS[j].y - CY));
+  oldA.forEach((o, n) => { S.grid[order[n]] = o.c; o.c.pop = .6; });
+  oldB.forEach((c, n) => { S.grid[NA + n] = c; });
+  S.warns = []; drag = null;
+}
+$('bench').onclick = () => {
+  const c = benchCost();
+  if (!c || S.coins < c || S.over) return;
+  S.coins -= c; relayout(S.layout, S.benchN + 1);
+  const s = SLOTS[SLOTS.length - 1]; burst(s.x, s.y, 12, ['#b07a3e', '#ffd23f']);
+  beep(600, .12, 'triangle', .05, 200); hud();
+};
+$('space').onclick = () => {
+  const c = spaceCost();
+  if (!c || S.coins < c || S.over) return;
+  if (!confirm(`Mở rộng sân với giá ${fmt(c)} xu? Sân to hơn, nhiều ô hơn, đường đi dài hơn.`)) return;
+  S.coins -= c; relayout(S.layout + 1, S.benchN);
+  banner(`Sân mới: ${NA} ô!`, 2); S.shake = 4;
+  SLOTS.slice(0, NA).forEach(s => burst(s.x, s.y, 2, ['#c9ec6b', '#ffffff']));
+  beep(392, .15, 'triangle', .06); setTimeout(() => beep(523, .15, 'triangle', .06), 120); setTimeout(() => beep(784, .3, 'triangle', .06), 240);
+  hud();
+};
+$('auto').onclick = () => { S.auto = !S.auto; S.autoT = 0; hud(); };
+// one merge per tick: the lowest-level pair of the same kind in the arena
+function autoMerge() {
+  let best = null;
+  for (let i = 0; i < NA; i++) {
+    const a = S.grid[i];
+    if (!isCrit(a) || a.lvl >= MAXL || (drag && drag.from === i)) continue;
+    for (let j = i + 1; j < NA; j++) {
+      const b = S.grid[j];
+      if (!isCrit(b) || b.kind !== a.kind || b.lvl !== a.lvl || (drag && drag.from === j)) continue;
+      if (!best || a.lvl < best.lvl) best = { i, j, lvl: a.lvl };
+      break;
+    }
+  }
+  if (!best) return false;
+  // keep the one nearer the centre, it has the better reach
+  const di = Math.hypot(SLOTS[best.i].x - CX, SLOTS[best.i].y - CY), dj = Math.hypot(SLOTS[best.j].x - CX, SLOTS[best.j].y - CY);
+  const [from, to] = di < dj ? [best.j, best.i] : [best.i, best.j];
+  doMerge(from, to);
+  return true;
+}
 $('speed').onclick = () => { S.speed = S.speed === 1 ? 2 : S.speed === 2 ? 3 : 1; $('speed').textContent = 'x' + S.speed; };
 $('pause').onclick = () => { if (S.over) return; S.paused = !S.paused; $('pause').textContent = S.paused ? '▶' : '⏸'; };
 $('sound').onclick = () => { muted = !muted; $('sound').textContent = muted ? '🔇' : '🔊'; try { localStorage.setItem('cd-muted', muted ? '1' : '0'); } catch (e) {} };
