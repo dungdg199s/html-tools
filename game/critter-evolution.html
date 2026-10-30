@@ -1124,7 +1124,7 @@ function drawCritter(x, y, c, s = 1, held = false) {
   const tier = L ? tierOf(c.star) : 0, b = c.bounce * 3, pop = 1 + c.pop * .35, sz = s * pop * (L ? 1.25 + .05 * tier : 1);
   ctx.save(); ctx.translate(x, y); ctx.scale(sz, sz);
   if (L && !held) drawLegendAura(accs, tier);
-  if (!held) ell(0, 13, 15, 5, 'rgba(0,0,0,.18)');
+  if (!held && !L) ell(0, 13, 15, 5, 'rgba(0,0,0,.18)');
   if (c.buff > 0 && !held) ell(0, 13, 18, 6, null, 'rgba(255,210,63,.8)', 2);
   ctx.translate(0, -b);
   ctx.beginPath(); ctx.moveTo(10, 6); ctx.quadraticCurveTo(26, 4, 22, -10);
@@ -1167,12 +1167,12 @@ function drawCritter(x, y, c, s = 1, held = false) {
   if (L) {
     const hy = -38 + Math.sin(S.time * 3) * 1.5;
     ell(0, hy, 12, 3.5, null, 'rgba(255,240,150,.9)', 2.5);
-    poly([[-9, -22], [-9, -31], [-4.5, -26], [0, -33], [4.5, -26], [9, -31], [9, -22]], tier ? TIERS[tier].c : '#ffd23f', tier ? TIERS[tier].d : '#8a6400', 1.2);
+    drawMetalCrown(tier);
     circle(-4.5, -25, 1.6, accs[0]); circle(4.5, -25, 1.6, accs[1]);
   }
   if (c.stun > 0) { ctx.globalAlpha = .35; ell(0, 0, 17, 15, '#555'); ctx.globalAlpha = 1; stars(0, -22, 14); }
   ctx.restore();
-  if (L) label('★'.repeat((c.star - 1) % 5 + 1), x, y + 24 * s, 13 * s, TIERS[tier].c, TIERS[tier].d);
+  if (L) drawMetalStars(x, y - 48 * sz - b, (c.star - 1) % 5 + 1, tier, 5.5 * s);
   else if (c.pick) {
     label('MAX', x - 4 * s, y - 28 * s - b, 15 * s, '#ffd23f', '#7a4a00');
     const by = y - 46 * s + Math.sin(S.time * 6) * 3;
@@ -1181,60 +1181,108 @@ function drawCritter(x, y, c, s = 1, held = false) {
   else if (c.lvl >= MAXL) label('MAX', x - 4 * s, y - 28 * s - b, 15 * s, '#ffd23f', '#7a4a00');
   else label(c.lvl, x - 6 * s, y - 28 * s - b, 19 * s, '#5be03a', '#173d0a');
 }
-function drawLegendAura(accs, tier) {
-  const T = TIERS[tier], t = S.time;
-  if (tier >= 2) {   // light pillar
-    const g = ctx.createLinearGradient(0, -90, 0, 10);
-    g.addColorStop(0, T.c + '00'); g.addColorStop(.7, T.c + '55'); g.addColorStop(1, T.c + '00');
-    ctx.fillStyle = g; const w = 16 + 4 * Math.sin(t * 5); ctx.fillRect(-w / 2, -90, w, 100);
+// metal gradient stops per star tier: highlight, body, shadow, rim light
+const METAL = [
+  ['#ffffff', '#d9dde3', '#7d8590', '#eef1f5'], ['#e0f3ff', '#5fb0ff', '#173f80', '#a8d8ff'], ['#fff7c8', '#ffcf3a', '#9a6206', '#ffe68f'],
+  ['#ffd6d6', '#f03a3a', '#7a0c0c', '#ff9c9c'], ['#f3dcff', '#b75cff', '#4c1287', '#e2acff'],
+];
+function metalFill(tier, top, bottom) {
+  const m = METAL[tier], g = ctx.createLinearGradient(0, top, 0, bottom);
+  g.addColorStop(0, m[0]); g.addColorStop(.38, m[1]); g.addColorStop(.62, m[2]); g.addColorStop(1, m[3]);
+  return g;
+}
+function starPath(r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .45 : r;
+    i ? ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
   }
-  if (tier >= 4) {   // rotating rune circle on the ground
-    ctx.save(); ctx.scale(1, .45); ctx.rotate(t * .8);
-    ctx.strokeStyle = T.c; ctx.lineWidth = 2; ctx.globalAlpha = .8;
-    circle(0, 26, 40, null, T.c, 2);
-    for (const off of [0, Math.PI / 3]) {
-      ctx.beginPath();
-      for (let i = 0; i <= 3; i++) { const a = off + i * Math.PI * 2 / 3; const px = Math.cos(a) * 40, py = 26 + Math.sin(a) * 40; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
-      ctx.stroke();
+  ctx.closePath();
+}
+// a row of metallic stars with a glint that sweeps across now and then
+function drawMetalStars(x, y, n, tier, size) {
+  const gap = size * 1.7, x0 = x - (n - 1) * gap / 2;
+  for (let i = 0; i < n; i++) {
+    ctx.save(); ctx.translate(x0 + i * gap, y);
+    starPath(size); ctx.fillStyle = metalFill(tier, -size, size); ctx.fill();
+    ctx.lineWidth = Math.max(1, size * .16); ctx.strokeStyle = TIERS[tier].d; ctx.stroke();
+    starPath(size * .5); ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fill();
+    const gl = (S.time * .8 - i * .12) % 2.2;
+    if (gl < .35) {
+      const k = Math.sin(gl / .35 * Math.PI), r = size * .9 * k;
+      ctx.globalAlpha = k; ctx.fillStyle = '#fff';
+      poly([[-size * .35, -size * .45 - r], [-size * .25, -size * .55], [-size * .35 + r, -size * .45], [-size * .25, -size * .35]], '#fff');
+      ctx.globalAlpha = 1;
     }
-    ctx.restore(); ctx.globalAlpha = 1;
+    ctx.restore();
   }
-  const gr = 36 + 6 * tier, g = ctx.createRadialGradient(0, 0, 6, 0, 0, gr);
-  g.addColorStop(0, accs[0] + '73'); g.addColorStop(.6, (tier ? T.c : accs[1]) + '40'); g.addColorStop(1, accs[1] + '00');
+}
+function drawMetalCrown(tier) {
+  const pts = [[-9, -22], [-9, -31], [-4.5, -26], [0, -33], [4.5, -26], [9, -31], [9, -22]];
+  poly(pts, metalFill(tier, -33, -22), TIERS[tier].d, 1.2);
+  ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8, -23.5); ctx.lineTo(8, -23.5); ctx.stroke();
+}
+// legend aura lives on the ground under the feet so it doesn't cover the neighbours
+function drawLegendAura(accs, tier) {
+  const T = TIERS[tier], t = S.time, m = METAL[tier];
+  if (tier >= 2) {   // thin light pillar
+    const g = ctx.createLinearGradient(0, -80, 0, 12);
+    g.addColorStop(0, T.c + '00'); g.addColorStop(.75, T.c + '3a'); g.addColorStop(1, T.c + '00');
+    ctx.fillStyle = g; const w = 10 + 3 * Math.sin(t * 5); ctx.fillRect(-w / 2, -80, w, 92);
+  }
+  ctx.save(); ctx.translate(0, 13); ctx.scale(1, .34);
+  const gr = 30 + 4 * tier, g = ctx.createRadialGradient(0, 0, 4, 0, 0, gr);
+  g.addColorStop(0, '#ffffffaa'); g.addColorStop(.35, (tier ? T.c : accs[0]) + '88'); g.addColorStop(1, accs[1] + '00');
   circle(0, 0, gr, g);
-  const R = 30 + 2 * tier + 2 * Math.sin(t * 3), rot = t * (1.5 + .4 * tier);
-  ctx.lineWidth = 3 + tier * .5; ctx.lineCap = 'round';
+  // metal rim with a moving specular highlight
+  const rim = ctx.createLinearGradient(-gr, 0, gr, 0), sh = (Math.sin(t * 1.6) + 1) / 2;
+  rim.addColorStop(0, m[2]); rim.addColorStop(Math.max(0, sh - .15), m[1]); rim.addColorStop(sh, '#ffffff'); rim.addColorStop(Math.min(1, sh + .15), m[1]); rim.addColorStop(1, m[2]);
+  circle(0, 0, gr - 6, null, rim, 4);
+  const rot = t * (1.5 + .4 * tier);
+  ctx.lineWidth = 3; ctx.lineCap = 'round';
   for (let i = 0; i < 12; i++) {
     ctx.beginPath(); ctx.strokeStyle = accs[i % 2];
-    ctx.arc(0, 0, R, rot + i * Math.PI / 6, rot + i * Math.PI / 6 + .35); ctx.stroke();
+    ctx.arc(0, 0, gr - 13, rot + i * Math.PI / 6, rot + i * Math.PI / 6 + .3); ctx.stroke();
   }
-  if (tier >= 1) {   // second ring in the tier colour, counter-rotating
+  if (tier >= 1) {
     ctx.strokeStyle = T.c; ctx.lineWidth = 2.5;
-    for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.arc(0, 0, R + 8, -rot * 1.3 + i * Math.PI / 4, -rot * 1.3 + i * Math.PI / 4 + .45); ctx.stroke(); }
+    for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.arc(0, 0, gr + 1, -rot * 1.3 + i * Math.PI / 4, -rot * 1.3 + i * Math.PI / 4 + .4); ctx.stroke(); }
   }
-  if (tier >= 3) {   // orbiting fire orbs
+  if (tier >= 4) {   // rune hexagram
+    ctx.save(); ctx.rotate(t * .8); ctx.strokeStyle = T.c; ctx.lineWidth = 2;
+    for (const off of [0, Math.PI / 3]) {
+      ctx.beginPath();
+      for (let i = 0; i <= 3; i++) { const a = off + i * Math.PI * 2 / 3; i ? ctx.lineTo(Math.cos(a) * (gr - 13), Math.sin(a) * (gr - 13)) : ctx.moveTo(Math.cos(a) * (gr - 13), Math.sin(a) * (gr - 13)); }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+  if (tier >= 3) {   // metal orbs skimming the ground
     for (let i = 0; i < 3; i++) {
-      const a = t * 3 + i * Math.PI * 2 / 3;
-      for (let k = 4; k >= 0; k--) {
-        const aa = a - k * .12;
-        ctx.globalAlpha = (1 - k / 5) * .9;
-        circle(Math.cos(aa) * (R + 4), Math.sin(aa) * (R + 4) * .55 - 6, 4.5 - k * .6, k ? T.c : '#fff6d0');
+      const a = t * 3 + i * Math.PI * 2 / 3, ox = Math.cos(a) * (gr - 2), oy = 13 + Math.sin(a) * (gr - 2) * .34;
+      for (let k = 3; k >= 1; k--) {
+        const aa = a - k * .14; ctx.globalAlpha = (1 - k / 4) * .6;
+        circle(Math.cos(aa) * (gr - 2), 13 + Math.sin(aa) * (gr - 2) * .34, 3.5 - k * .5, T.c);
       }
+      ctx.globalAlpha = 1;
+      const og = ctx.createRadialGradient(ox - 1.2, oy - 1.4, .5, ox, oy, 4.5);
+      og.addColorStop(0, '#ffffff'); og.addColorStop(.45, m[1]); og.addColorStop(1, m[2]);
+      circle(ox, oy, 4.5, og, TIERS[tier].d, 1);
     }
-    ctx.globalAlpha = 1;
   }
-  if (tier >= 4) {   // crackling lightning
+  if (tier >= 4) {   // short sparks crackling off the ground
     for (let i = 0; i < 3; i++) {
-      if (Math.random() < .5) continue;
-      const a = rnd(0, 7); ctx.beginPath(); ctx.moveTo(0, -6);
-      for (let k = 1; k <= 4; k++) { const d = k * 11; ctx.lineTo(Math.cos(a) * d + rnd(-5, 5), Math.sin(a) * d * .7 - 6 + rnd(-5, 5)); }
-      ctx.strokeStyle = Math.random() < .5 ? '#ffffff' : T.c; ctx.lineWidth = 1.6; ctx.stroke();
+      if (Math.random() < .55) continue;
+      const a = rnd(0, 7); ctx.beginPath(); ctx.moveTo(Math.cos(a) * 8, 13 + Math.sin(a) * 3);
+      for (let k = 1; k <= 3; k++) ctx.lineTo(Math.cos(a) * (8 + k * 9) + rnd(-3, 3), 13 + Math.sin(a) * (3 + k * 3) - k * 3 + rnd(-3, 3));
+      ctx.strokeStyle = Math.random() < .5 ? '#ffffff' : T.c; ctx.lineWidth = 1.5; ctx.stroke();
     }
   }
-  for (let i = 0; i < 5 + 3 * tier; i++) {
-    const a = -t * 1.2 + i * Math.PI * 2 / (5 + 3 * tier), px = Math.cos(a) * (26 + 2 * tier), py = Math.sin(a) * 12 - 6, r = 3 + Math.sin(t * 6 + i) * 1.2;
-    ctx.globalAlpha = .6 + .4 * Math.sin(t * 5 + i * 2);
-    poly([[px, py - r * 1.6], [px + r * .4, py - r * .4], [px + r * 1.6, py], [px + r * .4, py + r * .4], [px, py + r * 1.6], [px - r * .4, py + r * .4], [px - r * 1.6, py], [px - r * .4, py - r * .4]], tier ? T.c : '#fffbe0');
+  for (let i = 0; i < 4 + 2 * tier; i++) {   // small metal glints around the feet
+    const a = -t * 1.2 + i * Math.PI * 2 / (4 + 2 * tier), px = Math.cos(a) * (gr - 6), py = 13 + Math.sin(a) * (gr - 6) * .34, r = 2.2 + Math.sin(t * 6 + i);
+    ctx.globalAlpha = .55 + .45 * Math.sin(t * 5 + i * 2);
+    poly([[px, py - r * 1.8], [px + r * .35, py - r * .35], [px + r * 1.8, py], [px + r * .35, py + r * .35], [px, py + r * 1.8], [px - r * .35, py + r * .35], [px - r * 1.8, py], [px - r * .35, py - r * .35]], i % 2 ? '#ffffff' : m[1]);
   }
   ctx.globalAlpha = 1;
 }
