@@ -95,7 +95,7 @@ footer{display:flex; gap:10px; padding:8px 16px 14px; align-items:stretch}
 (() => {
 // ---------- world layout ----------
 const TW = 44, A0 = -Math.PI / 2 - 0.05;      // track width; zombies enter here (top, left of gate)
-const SLOT_R = 23, MAXL = 15, MAX_BENCH = 6;
+const SLOT_R = 23, MAXL = 6, MAX_BENCH = 6;   // two MAXL critters fuse into a legend
 // arena layouts, bought with the "Mở rộng" button: bigger field, more slots, longer track
 const LAYOUTS = [
   { tr: 166, rows: [3, 4, 5, 4, 3], dy: 48, cost: 1500 },
@@ -258,7 +258,7 @@ function fmt(n) {
 function zHp(w) { return Math.max(1, Math.round(1 + (w - 1) * 1.1 + .12 * w * w + Math.pow(1.12, w) - 1.12)); }
 function baseZombie(o) {
   return Object.assign({ pend: 0, d: 0, flash: 0, step: rnd(0, 6), armor: 0, shield: 0, shieldMax: 0,
-    slowM: 1, slowT: 0, slowRes: 0, psn: 0, psnT: 0, psnTick: .5, phaseT: rnd(0, 3.6), phased: false,
+    slowM: 1, slowT: 0, frzT: 0, slowRes: 0, psn: 0, psnT: 0, psnTick: .5, phaseT: rnd(0, 3.6), phased: false,
     lane: 0, laneCur: 0, blockT: 0, overT: 0, healT: 2, isBoss: false }, o);
 }
 function makeZombie(kind, w, o = {}) {
@@ -350,6 +350,7 @@ function effSpd(z) {
   let s = z.spd;
   if (z.isBoss) { if (z.state === 'cast') return 0; if (z.state === 'charge') s *= z.chargeMul; }
   let m = 1 - (1 - z.slowM) * (1 - z.slowRes);
+  if (z.frzT > 0) m *= .05;
   if (z.isBoss) m = Math.max(.7, m);
   return s * m;
 }
@@ -411,11 +412,12 @@ function update(dt) {
     if (!s.t.dead) { const p = zPos(s.t); s.tx = p.x; s.ty = p.y - 14 * s.t.r; }
     const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), v = 460 * dt;
     s.rot += dt * 16;
+    if (s.leg) { s.trail.push({ x: s.x, y: s.y }); if (s.trail.length > 6) s.trail.shift(); }
     if (d <= v + 6) { s.done = true; impact(s); }
     else { s.x += dx / d * v; s.y += dy / d * v; }
   }
 
-  for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; }
+  for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.g ?? 300) * dt; p.life -= dt; }
   for (const t of S.texts) { t.y -= 30 * dt; t.life -= dt; }
   for (const f of S.fx) f.life -= dt;
 
@@ -429,6 +431,7 @@ function update(dt) {
 function tickZombie(z, dt) {
   z.flash = Math.max(0, z.flash - dt * 6);
   if (z.slowT > 0 && (z.slowT -= dt) <= 0) z.slowM = 1;
+  if (z.frzT > 0) z.frzT -= dt;
   if (z.psnT > 0) {
     z.psnT -= dt; z.psnTick -= dt;
     if (z.psnTick <= 0) {
@@ -521,8 +524,9 @@ function startAbility(z, a) {
       warnSlot(z, top, a, 'stun', '#ff4040'); z.state = 'cast'; z.stT = a.warn; return true;
     }
     case 'grab': {
-      if (!crits.length) return false;
-      warnSlot(z, pick(crits), a, 'grab', '#a050ff'); z.state = 'cast'; z.stT = a.warn; return true;
+      const prey = crits.filter(i => !S.grid[i].legend);
+      if (!prey.length) return false;
+      warnSlot(z, pick(prey), a, 'grab', '#a050ff'); z.state = 'cast'; z.stT = a.warn; return true;
     }
     case 'stomp': {
       if (!crits.length) return false;
@@ -565,11 +569,13 @@ function updateWarns(dt) {
       } else text(s.x, s.y - 30, 'Hụt!', '#fff');
     } else if (!isCrit(c)) {
       text(s.x, s.y - 30, 'Hụt!', '#fff');
+    } else if (w.kind === 'grab' && c.legend) {
+      text(s.x, s.y - 30, 'Kháng!', '#ffd23f');
     } else if (w.kind === 'grab') {
       w.boss.sack.push({ lvl: c.lvl, kind: c.kind }); S.grid[w.slot] = null;
       text(s.x, s.y - 30, 'Bị bắt!', '#d08aff'); burst(s.x, s.y, 12, ['#a050ff', '#ffffff']); beep(200, .3, 'triangle', .06, -150);
     } else {
-      c.stun = Math.max(c.stun, w.dur); c.stunKind = 'daze';
+      c.stun = Math.max(c.stun, w.dur * (c.legend ? .5 : 1)); c.stunKind = 'daze';
       text(s.x, s.y - 30, 'Choáng!', '#ffe66b'); burst(s.x, s.y, 8, ['#ffe66b', '#ffffff']); beep(150, .15, 'square', .06);
     }
   }
@@ -577,10 +583,10 @@ function updateWarns(dt) {
 }
 
 // ---------- critters ----------
-function pickTarget(s, rg, pref) {
+function pickTarget(s, rg, pref, excl) {
   let best = null, bs = -1e9;
   for (const z of S.zombies) {
-    if (z.dead || z.phased || z.hp + z.shield - z.pend <= 0) continue;
+    if (z.dead || z.phased || z.hp + z.shield - z.pend <= 0 || (excl && excl.includes(z))) continue;
     const p = zPos(z);
     if (Math.hypot(p.x - s.x, p.y - s.y) > rg) continue;
     let sc = z.d;
@@ -591,15 +597,90 @@ function pickTarget(s, rg, pref) {
   }
   return best;
 }
+
+// ---------- legends ----------
+const KORD = Object.keys(TYPES);
+const SHORT = { leek: 'Hành', chili: 'Ớt', ice: 'Băng', durian: 'Sầu Riêng', piggy: 'Heo', bolt: 'Sấm', drum: 'Trống' };
+const LEGENDS = {
+  'chili+ice': 'Băng Hỏa Long', 'durian+bolt': 'Lôi Độc Thần', 'ice+bolt': 'Bão Tuyết Sấm', 'leek+chili': 'Hành Phi',
+  'chili+durian': 'Bom Thối', 'piggy+drum': 'Thần Tài Lễ Hội', 'leek+leek': 'Thần Hành',
+};
+const LEG_INFO = {
+  'chili+ice': 'quái bị chậm nhận +25% ST', 'durian+bolt': '+2 bước nhảy, không giảm ST', 'ice+bolt': '12% đóng băng',
+  'leek+chili': 'phát thứ 2 đủ ST và nổ', 'chili+durian': 'nổ to hơn, độc x1.5', 'piggy+drum': '+15% tốc đánh cho lính quanh', 'leek+leek': 'ném 3 phát',
+};
+const ATK = ['leek', 'chili', 'ice', 'durian', 'bolt'];
+const PRIO = ['bolt', 'chili', 'durian', 'ice', 'leek', 'drum', 'piggy'];
+const legKinds = ks => ks.slice().sort((a, b) => KORD.indexOf(a) - KORD.indexOf(b));
+function legendName(key) {
+  if (LEGENDS[key]) return LEGENDS[key];
+  const [a, b] = key.split('+');
+  return a === b ? `Thần ${SHORT[a]}` : `Huyền Thoại ${SHORT[a]}-${SHORT[b]}`;
+}
+const has = (c, k) => c.legend ? c.kinds.includes(k) : c.kind === k;
+function legendOf(kinds, star = 1) {
+  kinds = legKinds(kinds);
+  return Object.assign(critter(MAXL + 1, PRIO.find(k => kinds.includes(k))),
+    { legend: true, kinds, key: kinds.join('+'), star, fuseT: 0, haste: 0, sparkT: 0 });
+}
+function makeLegend(a, b) {
+  return Object.assign(legendOf([a.kind, b.kind]), { fuseT: .7, fuseSrc: [a.kind, b.kind] });
+}
+// what happens when c is dropped on t: 'merge' | 'fuse' | 'star' | null
+function mergeKind(c, t) {
+  if (!isCrit(c) || !isCrit(t) || c === t) return null;
+  if (!c.legend && !t.legend && c.lvl === t.lvl && c.kind === t.kind && c.lvl < MAXL) return 'merge';
+  if (!c.legend && !t.legend && c.lvl === MAXL && t.lvl === MAXL) return 'fuse';
+  if (c.legend && t.legend) return null;
+  const L = c.legend ? c : t, o = c.legend ? t : c;
+  if (L.legend && o.lvl === MAXL && L.kinds.includes(o.kind) && L.star < 5) return 'star';
+  return null;
+}
+function legendStats(c) {
+  const P = Math.pow(1.6, c.star - 1), atk = c.kinds.filter(k => ATK.includes(k));
+  const dsum = c.kinds.reduce((s, k) => s + TYPES[k].dmg, 0);
+  return {
+    P, atk, dmg: Math.round(critDmg(MAXL) * dsum * 1.4 * P * (1 + c.buff)),
+    rate: atk.length ? .85 * Math.min(...atk.map(k => tRate(k, MAXL))) : 1,
+    range: atk.length ? Math.max(...atk.map(k => tRange(k, MAXL))) + 25 * K : 0,
+  };
+}
+function legendEff(c, dmg) {
+  const e = { cols: c.kinds.map(k => TYPES[k].accent) };
+  if (has(c, 'chili')) e.r = 30 + 2 * MAXL + 10 + (c.key === 'chili+durian' ? 15 : 0);
+  if (has(c, 'ice')) e.slow = { m: 1 - Math.min(.7, .5 + .03 * (c.star - 1)), t: 1.8 + .2 * c.star };
+  if (has(c, 'durian')) { e.poison = .5 * dmg * (c.key === 'chili+durian' ? 1.5 : 1); e.pierce = 1; }
+  if (c.key === 'chili+ice') e.slowAmp = 1.25;
+  if (c.key === 'ice+bolt') e.freeze = .12;
+  return e;
+}
+function drumAura(d) {
+  if (!d.legend) return { rad: 60, buff: Math.min(.6, .15 + .03 * d.lvl), haste: 0, self: false };
+  const dd = d.key === 'drum+drum';
+  return { rad: dd ? 120 : 95, buff: dd ? .6 + .05 * (d.star - 1) : Math.min(.65, .45 + .05 * (d.star - 1)), haste: d.key === 'piggy+drum' ? .15 : 0, self: true };
+}
+function fuseBoom(c, s) {
+  const [ca, cb] = c.kinds.map(k => TYPES[k].accent);
+  S.fx.push({ kind: 'flash', x: s.x, y: s.y, life: .35, max: .35 });
+  S.fx.push({ kind: 'ring', x: s.x, y: s.y, r0: 10, r1: 120, col: ca, life: .5, max: .5 });
+  S.fx.push({ kind: 'ring', x: s.x, y: s.y, r0: 10, r1: 160, col: cb, life: .65, max: .65 });
+  burst(s.x, s.y - 10, 40, [ca, cb, '#ffd23f', '#ffffff']);
+  S.shake = 6;
+  banner('✨ ' + legendName(c.key) + ' ✨', 2.2);
+  [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, .15, 'triangle', .07), i * 90));
+}
+
+// ---------- critters ----------
 function updateCritters(dt) {
-  // drum aura
-  S.grid.forEach((c, i) => {
-    if (!isCrit(c)) return;
-    c.buff = 0;
-    if (i >= NA) return;
-    S.grid.forEach((d, j) => {
-      if (j === i || j >= NA || !isCrit(d) || d.kind !== 'drum' || d.stun > 0) return;
-      if (Math.hypot(SLOTS[i].x - SLOTS[j].x, SLOTS[i].y - SLOTS[j].y) <= 60) c.buff = Math.max(c.buff, Math.min(.6, .15 + .03 * d.lvl));
+  // drum auras (normal drums and drum legends)
+  S.grid.forEach(c => { if (isCrit(c)) { c.buff = 0; c.haste = 0; } });
+  S.grid.forEach((d, j) => {
+    if (j >= NA || !isCrit(d) || !has(d, 'drum') || d.stun > 0 || d.fuseT > 0) return;
+    const a = drumAura(d);
+    S.grid.forEach((c, i) => {
+      if (i >= NA || !isCrit(c) || (i === j && !a.self)) return;
+      if (Math.hypot(SLOTS[i].x - SLOTS[j].x, SLOTS[i].y - SLOTS[j].y) > a.rad) return;
+      c.buff = Math.max(c.buff, a.buff); c.haste = Math.max(c.haste, a.haste);
     });
   });
   S.grid.forEach((c, i) => {
@@ -607,13 +688,15 @@ function updateCritters(dt) {
     c.pop = Math.max(0, c.pop - dt * 3);
     if (c.type !== 'c') { c.shake = Math.max(0, c.shake - dt * 8); return; }
     c.bounce = Math.max(0, c.bounce - dt * 5); c.throwT = Math.max(0, c.throwT - dt * 4);
+    const s = SLOTS[i];
+    if (c.fuseT > 0) { if ((c.fuseT -= dt) <= 0) fuseBoom(c, s); return; }
     if (c.stun > 0) { c.stun -= dt; return; }
     if (i >= NA || (drag && drag.from === i)) return;   // bench critters just wait
-    const s = SLOTS[i], k = c.kind;
+    if (c.legend) return legendTick(c, s, dt);
+    const k = c.kind;
     if (k === 'piggy') {
       if (waveActive() && (c.gen -= dt) <= 0) {
-        c.gen = 8; const g = Math.round(2 * Math.pow(1.8, c.lvl - 1));
-        S.coins += g; text(s.x, s.y - 30, '+' + fmt(g), '#ffd23f', 14); c.bounce = 1; beep(900, .06, 'triangle', .03); hud();
+        c.gen = 8; giveCoins(c, s, Math.round(2 * Math.pow(1.8, c.lvl - 1)));
       }
       return;
     }
@@ -628,53 +711,101 @@ function updateCritters(dt) {
     const t = pickTarget(s, tRange(k, c.lvl), k);
     if (!t) { c.cd = .1; return; }
     const dmg = tDmg(k, c.lvl, c.buff);
-    c.cd = tRate(k, c.lvl); c.throwT = 1; c.bounce = 1;
-    if (k === 'bolt') {
-      const hits = [t], pts = [{ x: s.x, y: s.y - 14 }];
-      let cur = t, dd = dmg;
-      for (let n = 0; n < 2 + Math.floor(c.lvl / 3); n++) {
-        const cp = zPos(cur);
-        let nx = null, nd = 60;
-        for (const z of S.zombies) {
-          if (z.dead || z.phased || hits.includes(z)) continue;
-          const p = zPos(z), d = Math.hypot(p.x - cp.x, p.y - cp.y);
-          if (d < nd) { nd = d; nx = z; }
-        }
-        if (!nx) break;
-        hits.push(nx); cur = nx;
-      }
-      hits.forEach(z => { const p = zPos(z); pts.push({ x: p.x, y: p.y - 14 * z.r }); });
-      hits.forEach(z => { hit(z, Math.max(1, Math.round(dd)), { chain: 1 }); dd *= .8; });
-      S.fx.push({ kind: 'bolt', pts, life: .15, max: .15 });
-      beep(1200, .05, 'sawtooth', .03, -800);
-      return;
-    }
-    t.pend += dmg;
-    let eff = null;
+    c.cd = tRate(k, c.lvl) * (1 - c.haste); c.throwT = 1; c.bounce = 1;
+    if (k === 'bolt') return chain(s, t, 2 + Math.floor(c.lvl / 3), dmg, .8, {});
+    let eff = {};
     if (k === 'chili') eff = { r: 30 + 2 * c.lvl };
-    if (k === 'ice') eff = { m: 1 - Math.min(.6, .2 + .03 * c.lvl), t: 1.2 + .1 * c.lvl };
-    if (k === 'durian') eff = { dps: .5 * critDmg(c.lvl) * (1 + c.buff) };
-    S.shots.push({ kind: k, x: s.x + 10, y: s.y - 14, t, dmg, rot: rnd(0, 6), lvl: c.lvl, tx: 0, ty: 0, eff });
-    beep(520 + c.lvl * 30, .04, 'triangle', .02);
+    if (k === 'ice') eff = { slow: { m: 1 - Math.min(.6, .2 + .03 * c.lvl), t: 1.2 + .1 * c.lvl } };
+    if (k === 'durian') eff = { poison: .5 * critDmg(c.lvl) * (1 + c.buff), pierce: 1 };
+    shoot(c, s, t, dmg, eff, k);
   });
+}
+function giveCoins(c, s, g) {
+  S.coins += g; text(s.x, s.y - 30, '+' + fmt(g), '#ffd23f', 14); c.bounce = 1; beep(900, .06, 'triangle', .03); hud();
+}
+function legendTick(c, s, dt) {
+  const st = legendStats(c);
+  if ((c.sparkT -= dt) <= 0) {
+    c.sparkT = .25;
+    S.parts.push({ x: s.x + rnd(-16, 16), y: s.y + rnd(-6, 10), vx: rnd(-8, 8), vy: -30, g: -20, life: .9, c: pick([TYPES[c.kinds[0]].accent, TYPES[c.kinds[1]].accent, '#ffd23f']), r: rnd(1.5, 2.8) });
+  }
+  if (has(c, 'piggy') && waveActive() && (c.gen -= dt) <= 0) {
+    c.gen = 6; giveCoins(c, s, Math.round(2 * Math.pow(1.8, MAXL - 1) * 1.5 * st.P * (c.key === 'piggy+piggy' ? 2 : 1)));
+  }
+  if (has(c, 'drum') && (c.beat -= dt) <= 0) {
+    c.beat = 1; if (!st.atk.length) c.throwT = 1;
+    S.fx.push({ kind: 'ring', x: s.x, y: s.y, r0: 20, r1: drumAura(c).rad, col: 'rgba(255,210,63,.55)', life: .45, max: .45 });
+  }
+  if (!st.atk.length || (c.cd -= dt) > 0) return;
+  const pref = has(c, 'ice') ? 'ice' : has(c, 'durian') ? 'durian' : null;
+  const t = pickTarget(s, st.range, pref);
+  if (!t) { c.cd = .1; return; }
+  c.cd = st.rate * (1 - c.haste); c.throwT = 1; c.bounce = 1;
+  const eff = legendEff(c, st.dmg);
+  if (has(c, 'bolt')) {
+    const db = c.key === 'durian+bolt';
+    return chain(s, t, 4 + Math.floor(MAXL / 3) + (db ? 2 : 0), st.dmg, db ? 1 : .85, eff);
+  }
+  const shotKind = PRIO.find(k => st.atk.includes(k));
+  shoot(c, s, t, st.dmg, eff, shotKind);
+  if (has(c, 'leek')) {
+    const extra = c.key === 'leek+leek' ? 2 : 1, mult = c.key === 'leek+chili' || c.key === 'leek+leek' ? 1 : .5;
+    const used = [t];
+    for (let n = 0; n < extra; n++) {
+      const t2 = pickTarget(s, st.range, pref, used);
+      if (!t2) break;
+      used.push(t2);
+      shoot(c, s, t2, Math.round(st.dmg * mult), eff, shotKind);
+    }
+  }
+}
+function shoot(c, s, t, dmg, eff, kind) {
+  t.pend += dmg;
+  S.shots.push({ kind, x: s.x + 10, y: s.y - 14, t, dmg, rot: rnd(0, 6), lvl: c.lvl, tx: 0, ty: 0, eff, leg: !!c.legend, trail: [] });
+  beep(520 + Math.min(c.lvl, 8) * 30, .04, 'triangle', .02);
+}
+function chain(s, t, n, dmg, decay, eff) {
+  const hits = [t], pts = [{ x: s.x, y: s.y - 14 }];
+  let cur = t;
+  for (let k = 0; k < n; k++) {
+    const cp = zPos(cur);
+    let nx = null, nd = 60;
+    for (const z of S.zombies) {
+      if (z.dead || z.phased || hits.includes(z)) continue;
+      const p = zPos(z), d = Math.hypot(p.x - cp.x, p.y - cp.y);
+      if (d < nd) { nd = d; nx = z; }
+    }
+    if (!nx) break;
+    hits.push(nx); cur = nx;
+  }
+  hits.forEach(z => { const p = zPos(z); pts.push({ x: p.x, y: p.y - 14 * z.r }); });
+  let dd = dmg;
+  hits.forEach((z, k) => { deliver(z, Math.max(1, Math.round(dd)), eff, pts[k + 1].x, pts[k + 1].y); dd *= decay; });
+  S.fx.push({ kind: 'bolt', pts, life: .15, max: .15, cols: eff.cols });
+  beep(1200, .05, 'sawtooth', .03, -800);
+}
+function applyEff(z, dmg, e) {
+  if (z.dead) return;
+  if (e.slowAmp && z.slowT > 0) dmg *= e.slowAmp;
+  hit(z, dmg, { pierce: e.pierce, poison: e.poison, slow: e.slow });
+  if (e.freeze && !z.dead && Math.random() < e.freeze) z.frzT = .6;
+}
+// lands damage on z (single target) or splashes around x,y when the effect has a radius
+function deliver(z, dmg, e, x, y) {
+  if (!e.r) return applyEff(z, dmg, e);
+  S.fx.push({ kind: 'ring', x, y, r0: 4, r1: e.r, col: e.cols ? e.cols[0] : '#ff8a1a', life: .25, max: .25 });
+  burst(x, y, 8, e.cols ? [...e.cols, '#ffd23f'] : ['#ff8a1a', '#ffd23f']);
+  for (const o of S.zombies.slice()) {
+    if (o.dead) continue;
+    const p = zPos(o);
+    if (o === z || Math.hypot(p.x - x, p.y - 14 * o.r - y) <= e.r) applyEff(o, dmg, e);
+  }
 }
 function impact(s) {
   const t = s.t;
   if (!t.dead) t.pend = Math.max(0, t.pend - s.dmg);
-  if (s.kind === 'chili') {
-    S.fx.push({ kind: 'ring', x: s.tx, y: s.ty, r0: 4, r1: s.eff.r, col: '#ff8a1a', life: .25, max: .25 });
-    burst(s.tx, s.ty, 8, ['#ff8a1a', '#ffd23f']);
-    for (const z of S.zombies.slice()) {
-      if (z.dead) continue;
-      const p = zPos(z);
-      if (z === t || Math.hypot(p.x - s.tx, p.y - 14 * z.r - s.ty) <= s.eff.r) hit(z, s.dmg, { splash: 1 });
-    }
-    return;
-  }
-  if (t.dead) return;
-  if (s.kind === 'ice') hit(t, s.dmg, { slow: s.eff });
-  else if (s.kind === 'durian') hit(t, s.dmg, { pierce: 1, poison: s.eff.dps });
-  else hit(t, s.dmg);
+  if (t.dead && !s.eff.r) return;
+  deliver(t, s.dmg, s.eff, s.tx, s.ty);
 }
 
 // ---------- damage ----------
@@ -716,7 +847,7 @@ function kill(z) {
       burst(p.x, p.y - 10, 22, ['#ff5a1f', '#ffd23f', '#333']); S.shake = 6; beep(70, .35, 'sawtooth', .08, -30);
       SLOTS.forEach((s, i) => {
         const c = S.grid[i];
-        if (isCrit(c) && Math.hypot(s.x - p.x, s.y - p.y) <= 70) { c.stun = Math.max(c.stun, 2.5); c.stunKind = 'daze'; }
+        if (isCrit(c) && Math.hypot(s.x - p.x, s.y - p.y) <= 70) { c.stun = Math.max(c.stun, c.legend ? 1.25 : 2.5); c.stunKind = 'daze'; }
       });
     }
   }
@@ -726,7 +857,7 @@ function kill(z) {
 function bossReward(z) {
   S.gate = Math.min(S.gateMax, S.gate + 3);
   const hi = S.grid.reduce((m, c) => isCrit(c) ? Math.max(m, c.lvl) : m, 1);
-  const gifts = [{ lvl: Math.max(2, hi - 2), kind: rollKind() }, ...z.sack.map(s => ({ lvl: Math.min(MAXL, s.lvl + 1), kind: s.kind }))];
+  const gifts = [{ lvl: Math.min(MAXL - 1, Math.max(2, hi - 2)), kind: rollKind() }, ...z.sack.map(s => ({ lvl: Math.min(MAXL, s.lvl + 1), kind: s.kind }))];
   for (const g of gifts) {
     const e = emptySlots().length ? emptySlots() : emptySlots(true);
     if (e.length) { const i = pick(e); S.grid[i] = critter(g.lvl, g.kind); burst(SLOTS[i].x, SLOTS[i].y, 12, ['#ffe66b', '#fff']); }
@@ -744,7 +875,7 @@ function burst(x, y, n, cols) {
 function text(x, y, s, c, size = 16) { S.texts.push({ x, y, s, c, size, life: .9 }); }
 
 function gameOver() {
-  S.over = true;
+  S.over = true; clearSave();
   if (S.wave > best) { best = S.wave; try { localStorage.setItem('cd-best', best); } catch (e) {} }
   $('ow').textContent = S.wave; $('ob').textContent = best;
   setTimeout(() => $('over').style.display = 'flex', 500);
@@ -789,42 +920,78 @@ const LVL_COLORS = ['#c9ec6b', '#b6ef8f', '#8fe0d0', '#9cc8ff', '#c6a8ff', '#ffa
 
 // ---------- critters ----------
 function drawCritter(x, y, c, s = 1, held = false) {
-  const col = LVL_COLORS[(c.lvl - 1) % LVL_COLORS.length], acc = TYPES[c.kind].accent;
-  const b = c.bounce * 3, pop = 1 + c.pop * .35, k = c.kind;
-  ctx.save(); ctx.translate(x, y); ctx.scale(s * pop, s * pop);
+  if (c.fuseT > 0) return drawFusing(x, y, c, s);
+  const L = c.legend;
+  const col = L ? '#ffe66b' : LVL_COLORS[(c.lvl - 1) % LVL_COLORS.length];
+  const accs = L ? c.kinds.map(k => TYPES[k].accent) : [TYPES[c.kind].accent, TYPES[c.kind].accent];
+  const b = c.bounce * 3, pop = 1 + c.pop * .35, sz = s * pop * (L ? 1.25 : 1);
+  ctx.save(); ctx.translate(x, y); ctx.scale(sz, sz);
+  if (L && !held) drawLegendAura(accs);
   if (!held) ell(0, 13, 15, 5, 'rgba(0,0,0,.18)');
   if (c.buff > 0 && !held) ell(0, 13, 18, 6, null, 'rgba(255,210,63,.8)', 2);
   ctx.translate(0, -b);
   ctx.beginPath(); ctx.moveTo(10, 6); ctx.quadraticCurveTo(26, 4, 22, -10);
-  ctx.lineWidth = 6; ctx.strokeStyle = acc; ctx.lineCap = 'round'; ctx.stroke();
-  ctx.fillStyle = acc;
+  ctx.lineWidth = 6; ctx.strokeStyle = accs[0]; ctx.lineCap = 'round'; ctx.stroke();
   for (let i = -2; i <= 2; i++) {
     ctx.beginPath(); const a = -Math.PI / 2 + i * .42;
+    ctx.fillStyle = accs[(i + 2) % 2];
     ctx.moveTo(Math.cos(a - .25) * 12, Math.sin(a - .25) * 12 - 2);
     ctx.lineTo(Math.cos(a) * 21, Math.sin(a) * 21 - 4);
     ctx.lineTo(Math.cos(a + .25) * 12, Math.sin(a + .25) * 12 - 2); ctx.fill();
   }
-  ell(0, 2, 16, 13, col, '#3b4a1c', 2);
+  ell(0, 2, 16, 13, col, L ? '#8a6400' : '#3b4a1c', 2);
   ell(0, 6, 9, 7, '#fff8e8');
-  ctx.fillStyle = col; ctx.strokeStyle = '#3b4a1c'; ctx.lineWidth = 2;
+  ctx.fillStyle = col; ctx.strokeStyle = L ? '#8a6400' : '#3b4a1c'; ctx.lineWidth = 2;
   [-1, 1].forEach(d => { ctx.beginPath(); ctx.moveTo(d * 8, -8); ctx.lineTo(d * 16, -16); ctx.lineTo(d * 15, -3); ctx.closePath(); ctx.fill(); ctx.stroke(); });
-  // per-kind items
-  if (k === 'chili') { ell(2, -15, 9, 3.5, '#e8261c', '#7a120c', 1.2, -.3); ctx.strokeStyle = '#3c9a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-7, -12); ctx.lineTo(-10, -16); ctx.stroke(); }
-  if (k === 'ice') { ctx.beginPath(); ctx.arc(0, -10, 10, Math.PI, 0); ctx.closePath(); ctx.fillStyle = '#f4fbff'; ctx.fill(); ctx.strokeStyle = '#9cc8e8'; ctx.lineWidth = 1.5; ctx.stroke(); circle(0, -21, 3, '#fff', '#9cc8e8', 1); }
-  if (k === 'bolt') { ctx.strokeStyle = '#3b4a1c'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(3, -24); ctx.stroke(); circle(3, -25, 3.2, '#ffd23f', '#a07a00', 1); }
-  if (k === 'drum') { ell(0, 8, 9, 5.5, '#d9483b', '#6b1a12', 1.5); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-6, 7); ctx.lineTo(6, 10); ctx.moveTo(-6, 10); ctx.lineTo(6, 7); ctx.stroke(); }
-  // eyes
+  // per-kind items (a legend wears both)
+  if (has(c, 'ice')) { ctx.beginPath(); ctx.arc(0, -10, 10, Math.PI, 0); ctx.closePath(); ctx.fillStyle = '#f4fbff'; ctx.fill(); ctx.strokeStyle = '#9cc8e8'; ctx.lineWidth = 1.5; ctx.stroke(); circle(0, -21, 3, '#fff', '#9cc8e8', 1); }
+  if (has(c, 'chili')) { ell(2, -15, 9, 3.5, '#e8261c', '#7a120c', 1.2, -.3); ctx.strokeStyle = '#3c9a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-7, -12); ctx.lineTo(-10, -16); ctx.stroke(); }
+  if (has(c, 'bolt')) { ctx.strokeStyle = '#3b4a1c'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(3, -24); ctx.stroke(); circle(3, -25, 3.2, '#ffd23f', '#a07a00', 1); }
+  if (has(c, 'drum')) { ell(0, 8, 9, 5.5, '#d9483b', '#6b1a12', 1.5); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-6, 7); ctx.lineTo(6, 10); ctx.moveTo(-6, 10); ctx.lineTo(6, 7); ctx.stroke(); }
   [-6, 6].forEach(ex => { circle(ex, -2, 5.5, '#fff', '#3b4a1c', 1.5); circle(ex + 1, -1.5, 2.6, '#2a2a2a'); circle(ex + 1.8, -2.6, .9, '#fff'); });
-  if (k === 'piggy') { ell(0, 5, 5, 3.5, '#ffb3cf', '#a0506a', 1); circle(-1.6, 5, .9, '#5a2a3a'); circle(1.6, 5, .9, '#5a2a3a'); rrect(-4, -13, 8, 2.5, 1, '#7a2a3a'); }
-  else if (k !== 'drum') { ctx.beginPath(); ctx.arc(0, 5, 2.5, 0, Math.PI); ctx.lineWidth = 1.5; ctx.strokeStyle = '#3b4a1c'; ctx.stroke(); }
-  // arm
+  if (has(c, 'piggy')) { ell(0, 5, 5, 3.5, '#ffb3cf', '#a0506a', 1); circle(-1.6, 5, .9, '#5a2a3a'); circle(1.6, 5, .9, '#5a2a3a'); rrect(-4, -13, 8, 2.5, 1, '#7a2a3a'); }
+  else if (!has(c, 'drum')) { ctx.beginPath(); ctx.arc(0, 5, 2.5, 0, Math.PI); ctx.lineWidth = 1.5; ctx.strokeStyle = '#3b4a1c'; ctx.stroke(); }
   ctx.save(); ctx.translate(16, 5); ctx.rotate(-1.2 + c.throwT * 1.8);
   ell(0, -5, 3.5, 6, col, '#3b4a1c', 1.5);
-  if (k === 'durian') drawSpiky(0, -12, 4.5);
+  if (has(c, 'durian')) drawSpiky(0, -12, 4.5);
   ctx.restore();
+  if (L) {
+    const hy = -38 + Math.sin(S.time * 3) * 1.5;
+    ell(0, hy, 12, 3.5, null, 'rgba(255,240,150,.9)', 2.5);
+    poly([[-9, -22], [-9, -31], [-4.5, -26], [0, -33], [4.5, -26], [9, -31], [9, -22]], '#ffd23f', '#8a6400', 1.2);
+    circle(-4.5, -25, 1.6, accs[0]); circle(4.5, -25, 1.6, accs[1]);
+  }
   if (c.stun > 0) { ctx.globalAlpha = .35; ell(0, 0, 17, 15, '#555'); ctx.globalAlpha = 1; stars(0, -22, 14); }
   ctx.restore();
-  label(c.lvl, x - 6 * s, y - 28 * s - b, 19 * s, '#5be03a', '#173d0a');
+  if (L) label('★'.repeat(c.star), x, y + 22 * s, 13 * s, '#ffd23f', '#7a4a00');
+  else if (c.lvl >= MAXL) label('MAX', x - 4 * s, y - 28 * s - b, 15 * s, '#ffd23f', '#7a4a00');
+  else label(c.lvl, x - 6 * s, y - 28 * s - b, 19 * s, '#5be03a', '#173d0a');
+}
+function drawLegendAura(accs) {
+  const g = ctx.createRadialGradient(0, 0, 6, 0, 0, 36);
+  g.addColorStop(0, accs[0] + '73'); g.addColorStop(1, accs[1] + '00');
+  circle(0, 0, 36, g);
+  const R = 30 + 2 * Math.sin(S.time * 3), rot = S.time * 1.5;
+  ctx.lineWidth = 3; ctx.lineCap = 'round';
+  for (let i = 0; i < 12; i++) {
+    ctx.beginPath(); ctx.strokeStyle = accs[i % 2];
+    ctx.arc(0, 0, R, rot + i * Math.PI / 6, rot + i * Math.PI / 6 + .35); ctx.stroke();
+  }
+  for (let i = 0; i < 5; i++) {
+    const a = -S.time * 1.2 + i * 1.257, px = Math.cos(a) * 26, py = Math.sin(a) * 12 - 6, r = 3 + Math.sin(S.time * 6 + i) * 1.2;
+    ctx.globalAlpha = .6 + .4 * Math.sin(S.time * 5 + i * 2);
+    poly([[px, py - r * 1.6], [px + r * .4, py - r * .4], [px + r * 1.6, py], [px + r * .4, py + r * .4], [px, py + r * 1.6], [px - r * .4, py + r * .4], [px - r * 1.6, py], [px - r * .4, py - r * .4]], '#fffbe0');
+  }
+  ctx.globalAlpha = 1;
+}
+function drawFusing(x, y, c, s) {
+  const t = 1 - c.fuseT / .7;
+  c.fuseSrc.forEach((k, i) => {
+    const a = t * Math.PI * 4 + i * Math.PI, r = 26 * Math.pow(1 - t, 1.5);
+    const ghost = critter(MAXL, k); ghost.pop = 0; ghost.cd = 0;
+    drawCritter(x + Math.cos(a) * r, y + Math.sin(a) * r * .6, ghost, s * (1 - t * .5), true);
+  });
+  ctx.globalAlpha = t * .8; circle(x, y - 4, 10 + t * 20, '#fffbe0'); ctx.globalAlpha = 1;
 }
 function drawSpiky(x, y, r) {
   ctx.fillStyle = '#6b5e1a';
@@ -832,7 +999,22 @@ function drawSpiky(x, y, r) {
   circle(x, y, r, '#b5a33a', '#6b5e1a', 1);
 }
 function drawShot(s) {
-  const sc = 1 + Math.min(s.lvl, 8) * .06;
+  let sc = 1 + Math.min(s.lvl, 8) * .06;
+  if (s.leg) {
+    const cols = s.eff.cols;
+    s.trail.forEach((p, i) => {
+      if (!i) return;
+      const q = s.trail[i - 1];
+      ctx.globalAlpha = i / s.trail.length; ctx.strokeStyle = cols[i % 2]; ctx.lineWidth = 2 + i;
+      ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(s.x, s.y, 1, s.x, s.y, 16);
+    g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(.4, cols[0]); g.addColorStop(1, 'rgba(0,0,0,0)');
+    circle(s.x, s.y, 16, g); ctx.restore();
+    sc = 1.5;
+  }
   ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.rot); ctx.scale(sc, sc);
   if (s.kind === 'chili') { ell(0, 0, 8, 3.5, '#e8261c', '#7a120c', 1); ctx.strokeStyle = '#3c9a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(-11, -3); ctx.stroke(); }
   else if (s.kind === 'ice') { circle(0, 0, 5, '#f4fbff', '#9cc8e8', 1.5); ctx.strokeStyle = '#9cc8e8'; ctx.lineWidth = 1; for (let i = 0; i < 3; i++) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(4, 0); ctx.stroke(); } }
@@ -1011,6 +1193,7 @@ function drawBarrel(s, c) {
   label(fmt(c.hp), s.x + 4, s.y - (c.type === 'j' ? 22 : 2), c.type === 'j' ? 16 : 22, '#fff', '#1d1d1d');
 }
 
+let fuseHover = null;
 function drawWorld() {
   circle(CX, CY, TR + TW / 2 + 4, '#a39b74');
   circle(CX, CY, TR + TW / 2, '#c9c2a0');
@@ -1033,13 +1216,19 @@ function drawWorld() {
     const b0 = SLOTS[NA], b1 = SLOTS[SLOTS.length - 1];
     rrect(b0.x - 30, b0.y - 28, b1.x - b0.x + 60, 56, 16, '#b07a3e', '#6b3d12', 3);
     ctx.fillStyle = 'rgba(107,61,18,.25)'; ctx.fillRect(b0.x - 26, b0.y + 4, b1.x - b0.x + 52, 3);
-    label('Ô CHỜ', CX, b0.y - 36, 12, '#fff6e3', '#6b3d12');
+    label('Ô CHỜ', CX, b0.y + 38, 12, '#fff6e3', '#6b3d12');
   }
+  fuseHover = null;
   SLOTS.forEach((s, i) => {
     let col = s.bench ? 'rgba(80,40,10,.3)' : 'rgba(70,110,30,.28)';
     if (drag && i !== drag.from) {
       const c = S.grid[i], hc = S.grid[drag.from];
-      if (isCrit(c) && hc && c.lvl === hc.lvl && c.kind === hc.kind && c.lvl < MAXL) col = 'rgba(255,240,90,.75)';
+      const mk = mergeKind(hc, c);
+      if (mk === 'merge') col = 'rgba(255,240,90,.75)';
+      if (mk === 'fuse' || mk === 'star') {
+        col = `rgba(255,180,40,${.6 + .3 * Math.sin(S.time * 8)})`;
+        if (Math.hypot(drag.x - s.x, drag.y - s.y) < SLOT_R + 6) fuseHover = { s, t: mk === 'star' ? '★+1' : legendName(legKinds([hc.kind, c.kind]).join('+')) };
+      }
     }
     circle(s.x, s.y, SLOT_R, col);
     ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 4;
@@ -1063,8 +1252,9 @@ function drawFx() {
     ctx.globalAlpha = Math.max(0, f.life / f.max);
     if (f.kind === 'ring') circle(f.x, f.y, f.r0 + (f.r1 - f.r0) * t, null, f.col, 3);
     if (f.kind === 'fly') circle(f.x0 + (f.x1 - f.x0) * t, f.y0 + (f.y1 - f.y0) * t - Math.sin(t * Math.PI) * 20, 9 - t * 4, f.col, '#fff', 2);
+    if (f.kind === 'flash') circle(f.x, f.y, 45 * (.6 + t * .6), 'rgba(255,255,255,.85)');
     if (f.kind === 'bolt') {
-      [[6, 'rgba(255,210,63,.5)'], [2.5, '#fff6a0']].forEach(([lw, col]) => {
+      [[6, f.cols ? f.cols[0] : 'rgba(255,210,63,.5)'], [2.5, f.cols ? f.cols[1] : '#fff6a0']].forEach(([lw, col]) => {
         ctx.beginPath(); ctx.strokeStyle = col; ctx.lineWidth = lw;
         f.pts.forEach((q, i) => {
           if (!i) return ctx.moveTo(q.x, q.y);
@@ -1126,6 +1316,7 @@ function render() {
   if (drag) {
     const c = S.grid[drag.from];
     if (c) drawCritter(drag.x, drag.y - 10, c, 1.15, true);
+    if (fuseHover) label(fuseHover.t, fuseHover.s.x, fuseHover.s.y - 58, 14, '#ffd23f', '#5a3000');
   }
   drawBossBar();
   if (!S.queue.length && !S.zombies.length && S.breakT > 0 && !S.over) {
@@ -1169,6 +1360,12 @@ function endDrag(e) {
   if (j === from || (j < 0 && moved < 8)) {
     if (moved < 8) {
       const s = SLOTS[from], k = c.kind;
+      if (c.legend) {
+        const st = legendStats(c);
+        text(s.x, s.y - 52, `${legendName(c.key)} ${'★'.repeat(c.star)}`, '#ffd23f', 13);
+        text(s.x, s.y - 36, (st.atk.length ? `ST ${fmt(st.dmg)}` : 'Hỗ trợ') + (LEG_INFO[c.key] ? ' · ' + LEG_INFO[c.key] : ''), '#fff', 11);
+        return;
+      }
       const info = k === 'piggy' ? `+${Math.round(2 * Math.pow(1.8, c.lvl - 1))}🪙/8s` : k === 'drum' ? `+${Math.round(Math.min(.6, .15 + .03 * c.lvl) * 100)}% ST` : `ST ${fmt(tDmg(k, c.lvl, c.buff))}`;
       text(s.x, s.y - 44, `${TYPES[k].vi} · ${info}`, '#fff', 13);
     }
@@ -1177,8 +1374,19 @@ function endDrag(e) {
   if (j < 0) return;
   const t = S.grid[j];
   if (!t) { S.grid[j] = c; S.grid[from] = null; c.pop = .4; }
-  else if (isCrit(t) && t.lvl === c.lvl && t.kind === c.kind && t.lvl < MAXL) {
-    doMerge(from, j);
+  else if (mergeKind(c, t) === 'merge') doMerge(from, j);
+  else if (mergeKind(c, t) === 'fuse') {
+    const L = makeLegend(c, t);
+    S.grid[j] = L; S.grid[from] = null;
+    S.fx.push({ kind: 'fly', x0: SLOTS[from].x, y0: SLOTS[from].y, x1: SLOTS[j].x, y1: SLOTS[j].y, col: TYPES[c.kind].accent, life: .25, max: .25 });
+    beep(300, .6, 'sine', .05, 600);
+  } else if (mergeKind(c, t) === 'star') {
+    const L = c.legend ? c : t;
+    S.grid[j] = L; S.grid[from] = null;
+    L.star++; L.pop = 1; L.stun = 0;
+    burst(SLOTS[j].x, SLOTS[j].y - 8, 24, ['#ffd23f', '#ffffff', ...L.kinds.map(k => TYPES[k].accent)]);
+    text(SLOTS[j].x, SLOTS[j].y - 46, '★'.repeat(L.star), '#ffd23f', 18);
+    beep(660, .1, 'triangle', .06); setTimeout(() => beep(990, .2, 'triangle', .06), 90);
   } else if (isCrit(t)) {
     if (t.lvl === c.lvl && t.kind !== c.kind) text(SLOTS[j].x, SLOTS[j].y - 40, 'Khác loại!', '#ffb3b3', 13);
     S.grid[j] = c; S.grid[from] = t; c.pop = t.pop = .4;
@@ -1189,7 +1397,10 @@ function doMerge(from, j) {
   t.lvl++; t.pop = 1; t.stun = 0; S.grid[from] = null;
   S.fx.push({ kind: 'fly', x0: SLOTS[from].x, y0: SLOTS[from].y, x1: SLOTS[j].x, y1: SLOTS[j].y, col: TYPES[t.kind].accent, life: .25, max: .25 });
   burst(SLOTS[j].x, SLOTS[j].y - 8, 16, ['#ffe66b', '#ffffff', LVL_COLORS[(t.lvl - 1) % LVL_COLORS.length]]);
-  text(SLOTS[j].x, SLOTS[j].y - 40, 'LV ' + t.lvl + '!', '#5be03a');
+  text(SLOTS[j].x, SLOTS[j].y - 40, t.lvl === MAXL ? 'MAX!' : 'LV ' + t.lvl + '!', '#5be03a');
+  if (t.lvl === MAXL && !S.hintFuse && S.grid.filter(c => isCrit(c) && !c.legend && c.lvl === MAXL).length >= 2) {
+    S.hintFuse = true; setTimeout(() => banner('Kéo 2 lính MAX vào nhau → Huyền Thoại!', 3), 600);
+  }
   beep(440, .08, 'triangle', .06); setTimeout(() => beep(660, .08, 'triangle', .06), 70); setTimeout(() => beep(880, .12, 'triangle', .06), 140);
 }
 cv.addEventListener('pointerup', endDrag);
@@ -1276,12 +1487,53 @@ $('speed').onclick = () => { S.speed = S.speed === 1 ? 2 : S.speed === 2 ? 3 : 1
 $('pause').onclick = () => { if (S.over) return; S.paused = !S.paused; $('pause').textContent = S.paused ? '▶' : '⏸'; };
 $('sound').onclick = () => { muted = !muted; $('sound').textContent = muted ? '🔇' : '🔊'; try { localStorage.setItem('cd-muted', muted ? '1' : '0'); } catch (e) {} };
 $('sound').textContent = muted ? '🔇' : '🔊';
-$('again').onclick = newGame;
-$('restart').onclick = () => { if (S.over || confirm('Chơi lại từ đầu?')) newGame(); };
+$('again').onclick = () => { clearSave(); newGame(); };
+$('restart').onclick = () => { if (S.over || confirm('Chơi lại từ đầu? Tiến trình đã lưu sẽ bị xoá.')) { clearSave(); newGame(); } };
 document.addEventListener('visibilitychange', () => { if (document.hidden && S && !S.over && !S.paused) $('pause').click(); });
 
-// ?wave=N&coins=M jumps ahead (handy for trying bosses)
+// ?wave=N&coins=M jumps ahead (handy for trying bosses); ?max=N&kinds=a,b,.. adds max-level critters
 const qs = new URLSearchParams(location.search);
+
+// ---------- save / load (localStorage) ----------
+// Zombies in flight are not saved: reloading mid-wave replays that wave from its start.
+const SAVE_KEY = 'cd-save';
+const noSave = qs.has('wave') || qs.has('max');
+function saveGame() {
+  if (!S || S.over || noSave) return;
+  const data = {
+    v: 1, wave: waveActive() ? S.wave - 1 : S.wave, coins: S.coins, gate: S.gate, summons: S.summons,
+    layout: S.layout, benchN: S.benchN, auto: S.auto, speed: S.speed, hintFuse: !!S.hintFuse,
+    grid: S.grid.map(c => !c ? null : isCrit(c)
+      ? (c.legend ? { lg: c.kinds, star: c.star } : { k: c.kind, l: c.lvl })
+      : { t: c.type, hp: c.hp, max: c.max, gold: c.gold }),
+  };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch (e) {}
+}
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+function loadGame() {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) {}
+  if (!d || d.v !== 1) return false;
+  newGame();
+  Object.assign(S, { wave: d.wave, coins: d.coins, gate: d.gate, summons: d.summons, auto: d.auto, speed: d.speed || 1, hintFuse: d.hintFuse });
+  S.layout = Math.min(d.layout || 0, LAYOUTS.length - 1); S.benchN = Math.min(d.benchN || 0, MAX_BENCH);
+  applyLayout(S.layout, S.benchN);
+  S.grid = SLOTS.map((_, i) => {
+    const o = d.grid[i];
+    if (!o) return null;
+    if (o.lg) return legendOf(o.lg, o.star);
+    if (o.k && TYPES[o.k]) return critter(Math.min(o.l, MAXL), o.k);
+    if (o.t) return { type: o.t, hp: o.hp, max: o.max, gold: o.gold, shake: 0, pop: 1 };
+    return null;
+  });
+  $('speed').textContent = 'x' + S.speed;
+  banner(S.wave ? `Chơi tiếp từ wave ${S.wave + 1}` : 'Chơi tiếp', 2.5);
+  hud();
+  return true;
+}
+setInterval(saveGame, 3000);
+window.addEventListener('pagehide', saveGame);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
 
 // ---------- loop ----------
 let last = performance.now(), hudT = 0;
@@ -1296,8 +1548,11 @@ function frame(now) {
   render();
   requestAnimationFrame(frame);
 }
-resize(); newGame();
+resize(); if (noSave || !loadGame()) newGame();
 if (qs.has('wave')) { S.wave = Math.max(0, +qs.get('wave') - 1); S.coins = +qs.get('coins') || S.coins; hud(); }
+if (qs.has('max')) {   // ?max=N drops N max-level critters on the field
+  for (let n = 0; n < +qs.get('max'); n++) { const e = emptySlots(); if (e.length) S.grid[e[0]] = critter(MAXL, (qs.get('kinds') || '').split(',')[n] || rollKind()); }
+}
 requestAnimationFrame(frame);
 })();
 </script>
