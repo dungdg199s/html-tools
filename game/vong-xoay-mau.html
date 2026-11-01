@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Vòng Xoay Màu</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;background:#12122e;overflow:hidden;touch-action:none;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+body{display:flex;align-items:center;justify-content:center;font-family:'Nunito',system-ui,sans-serif}
+canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+const W = 450, H = 800;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize(){
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.width = W*scale + 'px'; cv.style.height = H*scale + 'px';
+  cv.width = W*scale*dpr; cv.height = H*scale*dpr;
+  ctx.setTransform(scale*dpr,0,0,scale*dpr,0,0);
+}
+addEventListener('resize', resize); resize();
+
+const COLORS = [
+  {c:'#e0362c', d:'#a3221a', n:'Đỏ'},
+  {c:'#2f7de1', d:'#1d55a3', n:'Xanh dương'},
+  {c:'#f06bb0', d:'#b5417e', n:'Hồng'},
+  {c:'#2e9a3a', d:'#1d6b26', n:'Xanh lá'},
+  {c:'#f2b01e', d:'#b07c0c', n:'Vàng'},
+  {c:'#f0782a', d:'#b2511a', n:'Cam'},
+];
+const PPU = 22;                 // particles per unit block
+const SPEED = 150;              // belt speed px/s
+// loop geometry
+const LX = 40, LY = 64, LW = 370, LH = 330, LR = 56, BELT = 36;
+const TUBE_TOP = 438, TUBE_BOT = 768;
+
+// ---------- Belt path (clockwise, centre line) ----------
+const cx0 = LX + BELT/2, cy0 = LY + BELT/2, cw = LW - BELT, ch = LH - BELT, cr = LR - BELT/4;
+const segs = [];
+(function build(){
+  const sx = cw - 2*cr, sy = ch - 2*cr, q = Math.PI/2*cr;
+  segs.push({t:'l', len:sx, x:cx0+cr, y:cy0, dx:1, dy:0});
+  segs.push({t:'a', len:q, cx:cx0+cw-cr, cy:cy0+cr, a0:-Math.PI/2});
+  segs.push({t:'l', len:sy, x:cx0+cw, y:cy0+cr, dx:0, dy:1});
+  segs.push({t:'a', len:q, cx:cx0+cw-cr, cy:cy0+ch-cr, a0:0});
+  segs.push({t:'l', len:sx, x:cx0+cw-cr, y:cy0+ch, dx:-1, dy:0});
+  segs.push({t:'a', len:q, cx:cx0+cr, cy:cy0+ch-cr, a0:Math.PI/2});
+  segs.push({t:'l', len:sy, x:cx0, y:cy0+ch-cr, dx:0, dy:-1});
+  segs.push({t:'a', len:q, cx:cx0+cr, cy:cy0+cr, a0:Math.PI});
+  let acc = 0; for (const s of segs){ s.s0 = acc; acc += s.len; }
+})();
+const PERIM = segs.reduce((a, s) => a + s.len, 0);
+const BOTTOM_S0 = segs[4].s0, BOTTOM_LEN = segs[4].len;
+function pointAt(s, off){
+  s = ((s % PERIM) + PERIM) % PERIM;
+  for (const g of segs){
+    if (s <= g.s0 + g.len){
+      const u = s - g.s0;
+      if (g.t === 'l'){
+        // outward normal for clockwise path = (dy, -dx) rotated: left of travel is inside
+        const nx = -g.dy, ny = g.dx; // points inward? check: top seg dx=1 → n=(0,1) inward
+        return {x: g.x + g.dx*u - nx*off, y: g.y + g.dy*u - ny*off};
+      } else {
+        const a = g.a0 + u/cr;
+        const r = cr + off;
+        return {x: g.cx + Math.cos(a)*r, y: g.cy + Math.sin(a)*r};
+      }
+    }
+  }
+  return {x:0, y:0};
+}
+// s on bottom segment for a given x
+const sForBottomX = x => BOTTOM_S0 + (cx0 + cw - cr - x);
+
+// ---------- Levels ----------
+const LEVELS = [
+  {n:3, cap:6},  {n:4, cap:6},  {n:4, cap:8},  {n:5, cap:8},
+  {n:5, cap:10}, {n:6, cap:10}, {n:6, cap:12},
+];
+let S;
+let bestLv = 1;
+try { bestLv = +localStorage.getItem('vxm_best') || 1; } catch(e){}
+
+function newLevel(lv){
+  const L = LEVELS[Math.min(lv-1, LEVELS.length-1)];
+  const n = L.n, cap = L.cap;
+  let units = [];
+  for (let c=0;c<n;c++) for (let i=0;i<cap;i++) units.push(c);
+  // shuffle in runs so we get chunky blocks like a real pile
+  for (let i=units.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [units[i], units[j]] = [units[j], units[i]]; }
+  // merge adjacents a bit: swap some neighbours to create runs
+  for (let k=0;k<units.length;k++){
+    if (Math.random() < 0.35){
+      const i = Math.floor(Math.random()*(units.length-1));
+      const j = units.findIndex((u, idx) => idx > i+1 && u === units[i]);
+      if (j > 0) [units[i+1], units[j]] = [units[j], units[i+1]];
+    }
+  }
+  const order = [...Array(6).keys()].sort(() => Math.random() - 0.5).slice(0, n);
+  const tubes = [];
+  const tw = Math.min(64, (W - 40) / n - 12), gap = (W - n*tw) / (n + 1);
+  for (let t=0;t<n;t++){
+    const u = units.slice(t*cap, (t+1)*cap).map(c => order[c]);
+    tubes.push({color: order[t], units: u, partial: 0, x: gap + t*(tw+gap), w: tw, shake: 0, glow: 0});
+  }
+  const beltCap = Math.round(cap * 2.6) * PPU;
+  S = {lv, cap, tubes, beltCap, parts: [], fly: [], won: false, lost: false, idle: 0, time: 0, moves: 0, winT: 0};
+  // avoid an already-clean tube at start
+  if (tubes.some(isClean)) return newLevel(lv);
+}
+function isClean(t){ return t.units.every(u => u === t.color); }
+function isDone(t){ return t.units.length === S.cap && isClean(t); }
+function topRun(t){
+  if (!t.units.length) return 0;
+  const c = t.units[t.units.length-1]; let k = 0;
+  for (let i=t.units.length-1;i>=0 && t.units[i]===c;i--) k++;
+  return k;
+}
+const beltCount = () => S.parts.length + S.fly.length;
+
+function tapTube(t){
+  if (S.won || S.lost) return;
+  if (!t.units.length || isClean(t)){ t.shake = 0.35; return; }
+  const k = topRun(t), need = k*PPU;
+  if (beltCount() + need > S.beltCap){ t.shake = 0.35; flashBelt = 0.5; return; }
+  const c = t.units[t.units.length-1];
+  const uh = (TUBE_BOT - TUBE_TOP - 16) / S.cap;
+  const topY = TUBE_BOT - 8 - t.units.length*uh;
+  t.units.length -= k;
+  S.moves++;
+  const gx = t.x + t.w/2;
+  const baseS = sForBottomX(gx);
+  for (let i=0;i<need;i++){
+    const delay = i * 0.012;
+    S.fly.push({c, x: t.x + 6 + Math.random()*(t.w-12), y: topY + Math.random()*k*uh,
+      s: baseS - i*1.1 - Math.random()*4, off: (Math.random()-0.5)*(BELT-12), t: -delay, dur: 0.35});
+  }
+}
+
+let flashBelt = 0;
+function update(dt){
+  S.time += dt;
+  flashBelt = Math.max(0, flashBelt - dt);
+  for (const t of S.tubes){ t.shake = Math.max(0, t.shake - dt); t.glow = Math.max(0, t.glow - dt); }
+  // flying particles → belt
+  for (const f of S.fly){
+    f.t += dt;
+    if (f.t >= f.dur){ f.done = true; f.s += (f.t - f.dur)*SPEED; S.parts.push({c:f.c, s:f.s, off:f.off, prevS:f.s}); }
+  }
+  S.fly = S.fly.filter(f => !f.done);
+  // belt movement + gate absorption
+  const gates = S.tubes.map(t => ({t, s: sForBottomX(t.x + t.w/2), open: isClean(t) && t.units.length < S.cap}));
+  let absorbed = false;
+  const drops = [];
+  for (const p of S.parts){
+    const prev = p.s;
+    p.s += SPEED*dt;
+    for (const g of gates){
+      if (!g.open || g.t.color !== p.c) continue;
+      // crossing gate (handle wrap)
+      const a = ((prev - g.s) % PERIM + PERIM) % PERIM, b = a + SPEED*dt;
+      if (b >= PERIM && a < PERIM){ /* crossed */ }
+      else continue;
+      if (g.t.units.length >= S.cap) continue;
+      p.dead = true; absorbed = true;
+      const pt = pointAt(p.s, p.off);
+      drops.push({c:p.c, x:pt.x, y:pt.y, t:g.t, vy:0});
+      g.t.partial += 1; g.t.glow = 0.2;
+      if (g.t.partial >= PPU){ g.t.partial -= PPU; g.t.units.push(g.t.color); if (g.t.units.length >= S.cap){ g.t.partial = 0; g.open = false; } }
+      break;
+    }
+    if (p.s > PERIM*1000) p.s -= PERIM*1000;
+  }
+  S.parts = S.parts.filter(p => !p.dead);
+  S.drops = (S.drops || []).concat(drops);
+  for (const d of S.drops){ d.vy += 1400*dt; d.y += d.vy*dt; if (d.y > TUBE_TOP + 30) d.dead = true; }
+  S.drops = S.drops.filter(d => !d.dead);
+
+  // win / stuck
+  if (!S.won && S.tubes.every(isDone) && !S.parts.length && !S.fly.length){
+    S.won = true; S.winT = 0;
+    if (S.lv + 1 > bestLv){ bestLv = S.lv + 1; try { localStorage.setItem('vxm_best', bestLv); } catch(e){} }
+  }
+  if (S.won) S.winT += dt;
+  if (!S.won && !S.lost){
+    if (absorbed || S.fly.length) S.idle = 0; else S.idle += dt;
+    const canTap = S.tubes.some(t => t.units.length && !isClean(t) && beltCount() + topRun(t)*PPU <= S.beltCap);
+    if (!canTap && S.idle > PERIM / SPEED + 0.5) S.lost = true;
+  }
+}
+
+// ---------- Draw ----------
+function rr(x, y, w, h, r){
+  ctx.beginPath(); ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r); ctx.closePath();
+}
+function drawBelt(){
+  // tray
+  ctx.save();
+  rr(LX-6, LY-6, LW+12, LH+12, LR+6);
+  ctx.fillStyle = '#5b56b8'; ctx.fill();
+  rr(LX, LY, LW, LH, LR); ctx.fillStyle = '#2a2766'; ctx.fill();
+  rr(LX + BELT, LY + BELT, LW - 2*BELT, LH - 2*BELT, LR - BELT*0.6);
+  ctx.fillStyle = '#5b56b8'; ctx.fill();
+  rr(LX + BELT + 5, LY + BELT + 5, LW - 2*BELT - 10, LH - 2*BELT - 10, LR - BELT*0.6 - 4);
+  ctx.fillStyle = '#16153a'; ctx.fill();
+  // moving belt dashes
+  ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = BELT - 8;
+  ctx.setLineDash([3, 14]); ctx.lineDashOffset = -S.time*SPEED;
+  ctx.beginPath();
+  for (let s=0;s<=PERIM;s+=6){ const p = pointAt(s, 0); s === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y); }
+  ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+  if (flashBelt > 0){
+    rr(LX, LY, LW, LH, LR); ctx.strokeStyle = `rgba(255,70,70,${flashBelt*1.6})`; ctx.lineWidth = 6; ctx.stroke();
+  }
+  ctx.restore();
+  // gates
+  for (const t of S.tubes){
+    const gx = t.x + t.w/2, gy = LY + LH;
+    const open = isClean(t) && t.units.length < S.cap;
+    ctx.fillStyle = open ? COLORS[t.color].c : 'rgba(255,255,255,.15)';
+    ctx.beginPath(); ctx.moveTo(gx - 9, gy - 2); ctx.lineTo(gx + 9, gy - 2); ctx.lineTo(gx, gy + 10); ctx.closePath(); ctx.fill();
+    if (open){
+      ctx.globalAlpha = 0.25 + 0.2*Math.sin(S.time*6);
+      ctx.beginPath(); ctx.arc(gx, gy - BELT/2 + 2, BELT/2, 0, Math.PI*2); ctx.fillStyle = COLORS[t.color].c; ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+function drawParticles(){
+  // batch by colour
+  const by = COLORS.map(() => []);
+  for (const p of S.parts) by[p.c].push(pointAt(p.s, p.off));
+  for (const f of S.fly){
+    if (f.t < 0) continue;
+    const k = Math.min(1, f.t / f.dur), e = 1 - (1-k)*(1-k);
+    const b = pointAt(f.s + f.t*SPEED*k, f.off);
+    by[f.c].push({x: f.x + (b.x - f.x)*e, y: f.y + (b.y - f.y)*e - Math.sin(k*Math.PI)*30});
+  }
+  for (const d of S.drops || []) by[d.c].push(d);
+  for (let c=0;c<COLORS.length;c++){
+    if (!by[c].length) continue;
+    ctx.fillStyle = COLORS[c].d;
+    for (const p of by[c]) ctx.fillRect(p.x - 5, p.y - 4, 10, 10);
+    ctx.fillStyle = COLORS[c].c;
+    for (const p of by[c]) ctx.fillRect(p.x - 5, p.y - 5, 9, 7);
+  }
+}
+function drawTube(t){
+  const col = COLORS[t.color];
+  const sh = t.shake ? Math.sin(t.shake*60)*4 : 0;
+  const x = t.x + sh, w = t.w, top = TUBE_TOP, bot = TUBE_BOT;
+  const done = isDone(t);
+  // frame
+  ctx.fillStyle = col.d; rr(x - 5, top - 4, w + 10, bot - top + 14, 10); ctx.fill();
+  ctx.fillStyle = col.c; rr(x - 5, top - 8, w + 10, bot - top + 12, 10); ctx.fill();
+  ctx.fillStyle = '#1b1a44'; rr(x + 3, top, w - 6, bot - top - 4, 6); ctx.fill();
+  if (t.glow > 0 || done){
+    ctx.save(); ctx.globalAlpha = done ? 0.35 + 0.15*Math.sin(S.time*4) : t.glow*2;
+    ctx.shadowColor = col.c; ctx.shadowBlur = 20; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+    rr(x - 5, top - 8, w + 10, bot - top + 12, 10); ctx.stroke(); ctx.restore();
+  }
+  // blocks (merge runs)
+  const uh = (bot - top - 16) / S.cap;
+  let i = 0;
+  while (i < t.units.length){
+    const c = t.units[i]; let j = i;
+    while (j < t.units.length && t.units[j] === c) j++;
+    const y1 = bot - 8 - j*uh, hgt = (j - i)*uh;
+    drawBlock(x + 7, y1 + 1.5, w - 14, hgt - 3, c);
+    i = j;
+  }
+  if (t.partial > 0){
+    const ph = uh * t.partial / PPU;
+    const y1 = bot - 8 - t.units.length*uh - ph;
+    drawBlock(x + 7, y1 + 1, w - 14, ph - 1, t.color, true);
+  }
+  // feet
+  ctx.fillStyle = '#ffd84a';
+  ctx.beginPath(); ctx.moveTo(x + 6, bot + 18); ctx.lineTo(x + 12, bot + 8); ctx.lineTo(x + 18, bot + 18); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x + w - 18, bot + 18); ctx.lineTo(x + w - 12, bot + 8); ctx.lineTo(x + w - 6, bot + 18); ctx.fill();
+  if (done){
+    ctx.font = '900 18px Nunito, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff'; ctx.fillText('✓', x + w/2, top - 22);
+  }
+}
+function drawBlock(x, y, w, h, c, soft){
+  if (h <= 0) return;
+  const col = COLORS[c];
+  ctx.fillStyle = col.d; rr(x, y, w, h, 3); ctx.fill();
+  ctx.fillStyle = col.c; rr(x, y, w, Math.max(1, h - 3), 3); ctx.fill();
+  if (!soft && h > 8){ ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.fillRect(x + 3, y + 2, w - 6, 3); }
+}
+function drawHUD(){
+  ctx.textBaseline = 'middle';
+  ctx.font = '900 18px Nunito, sans-serif'; ctx.fillStyle = '#fff'; ctx.textAlign = 'left';
+  ctx.font = '20px serif'; ctx.fillText('🏠', 12, 30);
+  ctx.font = '900 18px Nunito, sans-serif'; ctx.fillText('Màn ' + S.lv, 46, 30);
+  ctx.textAlign = 'right'; ctx.font = '20px serif'; ctx.fillText('🔄', W - 12, 30);
+  // belt load meter
+  const load = beltCount() / S.beltCap;
+  const mx = 150, mw = 150;
+  ctx.fillStyle = '#2a2766'; rr(mx, 22, mw, 14, 7); ctx.fill();
+  ctx.fillStyle = load > 0.85 ? '#ff5a4f' : load > 0.6 ? '#f2b01e' : '#5be37a';
+  rr(mx, 22, Math.max(6, mw*Math.min(1, load)), 14, 7); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '800 11px Nunito, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Băng chuyền ' + Math.round(load*100) + '%', mx + mw/2, 29.5);
+  // hint in centre
+  ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '800 14px Nunito, sans-serif';
+  const lines = S.lv === 1 && S.moves < 3
+    ? ['Chạm ống để đổ khối trên cùng', 'lên băng chuyền.', '', 'Ống nào chỉ còn đúng màu khung', 'sẽ mở cổng ▼ hút hạt cùng màu.', '', 'Lấp đầy mọi ống bằng màu của nó!']
+    : ['Lượt: ' + S.moves];
+  lines.forEach((l, i) => ctx.fillText(l, W/2, LY + LH/2 - (lines.length-1)*11 + i*22));
+}
+function overlay(title, sub, btn){
+  ctx.fillStyle = 'rgba(10,10,30,.75)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#2a2766'; rr(50, 270, W - 100, 230, 22); ctx.fill();
+  ctx.strokeStyle = '#5b56b8'; ctx.lineWidth = 4; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff'; ctx.font = '900 30px Nunito, sans-serif'; ctx.fillText(title, W/2, 320);
+  ctx.fillStyle = '#c8c5ff'; ctx.font = '700 16px Nunito, sans-serif'; ctx.fillText(sub, W/2, 365);
+  ctx.fillStyle = '#5be37a'; rr(W/2 - 90, 410, 180, 54, 27); ctx.fill();
+  ctx.fillStyle = '#123'; ctx.font = '900 20px Nunito, sans-serif'; ctx.fillText(btn, W/2, 438);
+}
+function draw(){
+  ctx.fillStyle = '#12122e'; ctx.fillRect(0, 0, W, H);
+  drawBelt();
+  drawHUD();
+  for (const t of S.tubes) drawTube(t);
+  drawParticles();
+  if (S.won && S.winT > 0.6) overlay('Hoàn thành! 🎉', 'Màn ' + S.lv + ' · ' + S.moves + ' lượt', 'Màn tiếp');
+  else if (S.lost) overlay('Kẹt rồi!', 'Băng chuyền đầy, không còn nước đi', 'Chơi lại');
+}
+
+// ---------- Input ----------
+cv.addEventListener('pointerdown', ev => {
+  ev.preventDefault();
+  const rc = cv.getBoundingClientRect();
+  const x = (ev.clientX - rc.left) / scale, y = (ev.clientY - rc.top) / scale;
+  if (y < 52 && x < 40){ location.href = '../index.html'; return; }
+  if (y < 52 && x > W - 44){ newLevel(S.lv); return; }
+  if ((S.won && S.winT > 0.6) || S.lost){
+    if (x > W/2 - 90 && x < W/2 + 90 && y > 410 && y < 464) newLevel(S.won ? S.lv + 1 : S.lv);
+    return;
+  }
+  for (const t of S.tubes){
+    if (x > t.x - 10 && x < t.x + t.w + 10 && y > TUBE_TOP - 30 && y < TUBE_BOT + 20){ tapTube(t); return; }
+  }
+});
+
+let startLv = 1;
+try { startLv = +localStorage.getItem('vxm_cur') || 1; } catch(e){}
+newLevel(startLv);
+window.__vxm = { get S(){ return S; }, tapTube, newLevel };
+let saved = startLv;
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - last)/1000); last = now;
+  update(dt); draw();
+  if (S.lv !== saved){ saved = S.lv; try { localStorage.setItem('vxm_cur', S.lv); } catch(e){} }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
