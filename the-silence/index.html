@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khi Thiên Đường Im Lặng</title>
+<link rel="stylesheet" href="assets/style.css">
+<script>
+try {
+  var s = JSON.parse(localStorage.getItem("silence-reader") || "{}");
+  if (s.theme) document.documentElement.dataset.theme = s.theme;
+  if (s.size) document.documentElement.style.setProperty("--reader-size", s.size + "px");
+} catch (e) {}
+</script>
+</head>
+<body class="index">
+<header class="cover">
+  <p class="eyebrow">The Silence</p>
+  <h1>Khi Thiên Đường Im Lặng</h1>
+  <p class="actions">
+    <a class="btn" href="q01-c01.html">Đọc từ đầu</a>
+    <a class="btn ghost" id="continue" href="#" hidden>Đọc tiếp</a>
+  </p>
+  
+</header>
+<main class="contents">
+<h2 class="part">Phần I: Người Tìm Ký Ức</h2>
+<section class="book"><h3>Quyển 1 — Thành Phố Chôn Vùi</h3><ol class="toc"><li><a href="q01-c01.html" data-code="q01-c01"><span class="num">Chương 1</span><span class="ttl">Khách ngoài cát</span></a></li>
+<li><a href="q01-c02.html" data-code="q01-c02"><span class="num">Chương 2</span><span class="ttl">Cổng bắc lúc chạng vạng</span></a></li></ol></section>
+<section class="editions"><h2 class="part">Bản khác</h2><a class="edition-card" href="ln/index.html"><span class="ttl">Bản light novel (thử nghiệm)</span><span class="num">2 chương · kể ngôi thứ nhất</span></a></section>
+</main>
+<div class="toolbar" role="toolbar" aria-label="Tùy chỉnh đọc">
+  <button type="button" data-action="smaller" title="Chữ nhỏ hơn" aria-label="Chữ nhỏ hơn">A−</button>
+  <button type="button" data-action="larger" title="Chữ lớn hơn" aria-label="Chữ lớn hơn">A+</button>
+  <button type="button" data-action="theme" title="Đổi nền: sáng / giấy cũ / tối" aria-label="Đổi nền">Nền</button>
+</div>
+<script>window.SILENCE_EDITION = ""; window.SILENCE_CHAPTERS = ["q01-c01", "q01-c02"];</script>
+<script src="assets/reader.js"></script>
+</body>
+</html>
